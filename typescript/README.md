@@ -541,6 +541,12 @@ await conn.close();
   the last processed event, without gaps or repeats. A connection that holds
   nothing closes after a few seconds. Liveness is checked with an application
   `ping` when a connection is silent.
+- **Slow callbacks.** The callbacks run one event at a time while the SDK keeps
+  reading the core. When more than `maxBufferedBytes` of events (default 8 MiB)
+  wait for them, the connection stops taking events and, once the callbacks have
+  caught up, attaches again from the last event they completed, so the core sends
+  the rest again. Memory stays bounded and nothing is skipped; Client Tool calls
+  are not affected.
 - **One executor per Session.** A connection attaches for execution by default.
   Another process's connection to the same Session takes it over, and this one
   ends with `closed` resolving `{ reason: "superseded" }`. One `OrganizationClient`

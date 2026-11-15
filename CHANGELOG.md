@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.4.0-rc.1
+
+- Session connections bound the events waiting for their callbacks. The SDK
+  keeps reading the core while `onEvent` and the other callbacks run, so slow
+  callbacks used to queue every later event in memory. Past
+  `maxBufferedBytes` (a new `connect()` option, default 8 MiB) the connection
+  now drops events and, once the callbacks have caught up, attaches again from
+  the last event they completed, so the core sends the rest again in order.
+- Fix events lost right after an attach. Node.js's WebSocket hands over
+  messages that arrive together in one task, so events the core sent with the
+  `session.attach` answer, such as the replay after a `cursor`, reached the SDK
+  before it had recorded the attachment, and were dropped.
+
 ## 0.4.0-rc.0
 
 Release candidate on the `next` dist-tag for service `4305ef67`. Compared with

@@ -55,6 +55,8 @@ export interface BackendConnectionHello {
 export type BackendNotificationHandler = (
   method: string,
   params: Record<string, unknown>,
+  /** Length of the frame that carried it, in UTF-16 code units. */
+  size: number,
 ) => void;
 
 export interface OpenBackendTransportInput {
@@ -105,6 +107,8 @@ export const backendConnectionUrl = (baseUrl: string): string => {
 };
 
 interface PendingRequest {
+  /** Called with a successful answer before any later frame is handled. */
+  onAnswer?: (result: unknown) => void;
   resolve(value: unknown): void;
   reject(error: unknown): void;
 }
@@ -257,7 +261,11 @@ export class BackendTransport {
    * BackendRequestError; a connection that ends first rejects with its
    * BackendConnectionClosedError, and the request's outcome is then unknown.
    */
-  request<T = unknown>(method: string, params: Record<string, unknown>): Promise<T> {
+  request<T = unknown>(
+    method: string,
+    params: Record<string, unknown>,
+    onAnswer?: (result: unknown) => void,
+  ): Promise<T> {
     if (this.#error) return Promise.reject(this.#error);
     const id = this.#nextId++;
     const text = JSON.stringify({ jsonrpc: "2.0", id, method, params });
@@ -271,6 +279,7 @@ export class BackendTransport {
       this.#pending.set(id, {
         resolve: resolve as (value: unknown) => void,
         reject,
+        ...(onAnswer ? { onAnswer } : {}),
       });
       try {
         this.#socket.send(text);
@@ -322,6 +331,7 @@ export class BackendTransport {
       this.#onNotification(
         message.method,
         isObject(message.params) ? message.params : {},
+        (data as string).length,
       );
       return;
     }
@@ -340,7 +350,15 @@ export class BackendTransport {
           ...(isObject(data) && "details" in data ? { details: data.details } : {}),
         }),
       );
-    } else pending.resolve(message.result);
+    } else {
+      // Frames that arrived with the answer are handled before a promise
+      // continuation could run, so `onAnswer` sees the answer first.
+      try {
+        pending.onAnswer?.(message.result);
+      } finally {
+        pending.resolve(message.result);
+      }
+    }
   }
 
   #checkLiveness(interval: number): void {
