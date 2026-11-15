@@ -32,7 +32,12 @@ export type AttachmentEnd =
 /** Requests over one Backend Connection. */
 export interface BackendLink {
   readonly open: boolean;
-  request<T = unknown>(method: string, params: Record<string, unknown>): Promise<T>;
+  /** `onAnswer` sees a successful answer before any frame that followed it. */
+  request<T = unknown>(
+    method: string,
+    params: Record<string, unknown>,
+    onAnswer?: (result: unknown) => void,
+  ): Promise<T>;
 }
 
 /**
@@ -45,8 +50,8 @@ export interface PoolAttachment {
   attachParams(): Record<string, unknown>;
   /** A (re)attach took effect on `link`, which now delivers the Session. */
   attached(result: AttachResult, link: BackendLink): void;
-  /** A notification for this Session from the connection that holds it. */
-  notify(method: string, params: Record<string, unknown>, link: BackendLink): void;
+  /** A notification for this Session from the connection that holds it; `size` is its frame's UTF-8 size. */
+  notify(method: string, params: Record<string, unknown>, link: BackendLink, size: number): void;
   /** The pool gave the attachment up; called at most once, never after `detach()`. */
   ended(end: AttachmentEnd): void;
 }
@@ -181,6 +186,66 @@ export class BackendConnectionPool {
   }
 
   /**
+   * Attach again on the connection that holds the attachment, with its
+   * current parameters, so that the core replays the Session's events after
+   * the attachment's cursor. Only for observing attachments: an executing
+   * attach could take the Session back from a newer executor. Nothing happens
+   * while the attachment is moving to another connection, whose attach
+   * replays the same way. A transient failure is recovered like a lost
+   * connection; any other ends the attachment.
+   */
+  async resume(attachment: PoolAttachment): Promise<void> {
+    if (this.#wanted.get(attachment.sessionId) !== attachment) return;
+    const slot = this.#where.get(attachment);
+    if (!slot || slot.held.get(attachment.sessionId) !== attachment) return;
+    const holds = () =>
+      this.#wanted.get(attachment.sessionId) === attachment &&
+      slot.held.get(attachment.sessionId) === attachment;
+    try {
+      const result = await this.#limited(async () => {
+        // Closed or moved while waiting for its turn: nothing to resume.
+        if (!holds()) return undefined;
+        return slot.transport.request(
+          "session.attach",
+          attachment.attachParams(),
+          // The replay may arrive with the answer: take it from the answer on.
+          (answer) => {
+            if (isAttachResult(answer) && holds()) attachment.attached(answer, slot.transport);
+          },
+        );
+      });
+      if (result === undefined) return;
+      if (!isAttachResult(result))
+        throw new TiDBLinkError("session.attach returned an invalid result");
+    } catch (error) {
+      if (!holds()) return;
+      this.#release(slot, attachment.sessionId);
+      this.#where.delete(attachment);
+      slot.transport
+        .request("session.detach", { sessionId: attachment.sessionId })
+        .catch(() => undefined);
+      this.#maybeIdle(slot);
+      const reason = error instanceof BackendRequestError ? error.reason : undefined;
+      if (
+        !(error instanceof BackendRequestError) ||
+        error.code === -32603 ||
+        reason === "connection_full" ||
+        reason === "connection_draining"
+      ) {
+        // Another connection, or a later attempt, may take it.
+        void this.#recover(attachment, RECOVERY_JITTER_MS);
+        return;
+      }
+      this.#wanted.delete(attachment.sessionId);
+      safely(() =>
+        attachment.ended(
+          reason === "session_not_found" ? { reason: "session_deleted" } : { reason: "error", error },
+        ),
+      );
+    }
+  }
+
+  /**
    * Send a request that any connection of the Organization may carry, such as
    * `tool.result`, retrying on another connection after transient failures
    * until `retryUntil` (epoch milliseconds). Only idempotent requests belong here.
@@ -256,21 +321,29 @@ export class BackendConnectionPool {
       let slot: Slot | undefined;
       try {
         slot = await this.#reserveSlot();
+        const held = slot;
+        let taken = false;
+        // The Session's events may arrive with the answer: route them from the answer on.
+        const take = (result: unknown) => {
+          if (!isAttachResult(result) || this.#wanted.get(attachment.sessionId) !== attachment)
+            return;
+          taken = true;
+          held.held.set(attachment.sessionId, attachment);
+          this.#where.set(attachment, held);
+          attachment.attached(result, held.transport);
+        };
         const result = await this.#limited(() =>
-          slot!.transport.request("session.attach", attachment.attachParams()),
+          held.transport.request("session.attach", attachment.attachParams(), take),
         );
         if (!isAttachResult(result))
           throw new TiDBLinkError("session.attach returned an invalid result");
-        if (this.#wanted.get(attachment.sessionId) !== attachment) {
+        if (!taken) {
           // Closed while the attach was in flight: release what it took.
-          slot.transport
+          held.transport
             .request("session.detach", { sessionId: attachment.sessionId })
             .catch(() => undefined);
           throw new TiDBLinkError("The Session connection was closed while attaching");
         }
-        slot.held.set(attachment.sessionId, attachment);
-        this.#where.set(attachment, slot);
-        attachment.attached(result, slot.transport);
         return result;
       } catch (error) {
         failures += 1;
@@ -370,8 +443,8 @@ export class BackendConnectionPool {
         apiKey: this.#apiKey,
         WebSocket: this.#WebSocket,
         ...(this.#openTimeoutMs === undefined ? {} : { openTimeoutMs: this.#openTimeoutMs }),
-        onNotification: (method, params) => {
-          if (slot) this.#notify(slot, method, params);
+        onNotification: (method, params, size) => {
+          if (slot) this.#notify(slot, method, params, size);
         },
       });
     } catch (error) {
@@ -398,7 +471,7 @@ export class BackendConnectionPool {
     return slot;
   }
 
-  #notify(slot: Slot, method: string, params: Record<string, unknown>): void {
+  #notify(slot: Slot, method: string, params: Record<string, unknown>, size: number): void {
     if (method === "connection.drain") {
       const closeAfterMs = Number(params.closeAfterMs);
       this.#drain(slot, Number.isFinite(closeAfterMs) ? closeAfterMs : 0);
@@ -420,7 +493,7 @@ export class BackendConnectionPool {
       this.#maybeIdle(slot);
       return;
     }
-    safely(() => attachment.notify(method, params, slot.transport));
+    safely(() => attachment.notify(method, params, slot.transport, size));
   }
 
   /** Move every attachment to another connection, then close this one. */

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.4.0-rc.1
+
+- Observing Session connections bound the events waiting for their
+  callbacks. The SDK keeps reading the core while `onEvent` and the other
+  callbacks run, so slow callbacks used to queue every later event in memory.
+  Past `maxBufferedBytes` (a new `connect()` option for observing connections,
+  default 8 MiB) an observing connection now drops events and, once the
+  callbacks have caught up, attaches again from the last event they completed,
+  so the core sends the rest again in order. Executing connections still queue
+  every event.
+- Fix events lost right after an attach. Node.js's WebSocket hands over
+  messages that arrive together in one task, so events the core sent with the
+  `session.attach` answer, such as the replay after a `cursor`, reached the SDK
+  before it had recorded the attachment, and were dropped. Such events now
+  reach the callbacks once `connect()` has returned.
+
 ## 0.4.0-rc.0
 
 Release candidate on the `next` dist-tag for service `4305ef67`. Compared with
