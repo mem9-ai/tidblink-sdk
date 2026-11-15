@@ -2,106 +2,82 @@
 
 ## Unreleased
 
-- Add the `lamp-backend.mjs` example: the backend of a smart lamp that users
-  talk to by typing or by voice, keeping the lamp's Session connected while it
-  is online, forwarding its Client Tools to the lamp and handing the lamp
-  Realtime grants. The README shows its MQTT wiring and the lamp's firmware in
-  pseudo-code.
-- **Breaking:** remove the APIs built on the per-Session event subscription,
-  which Backend Connections replace (service ADR 0109):
-  `session.events()`, `session.subscribe()`, `session.observe()`,
-  `session.listPendingClientToolCalls()`, `session.submitClientToolOutput()`,
-  `parseSessionEvent()`, `StreamIdleError`, `ObservationStoppedError` and the
-  types `SessionEventsOptions`, `ObserveTurnOptions`, `TurnObservation`,
-  `SubscribeOptions`, `SubscriptionItem`, `PendingClientToolCall` and
-  `ClientToolOutputInput`. Follow events with `session.connect({ onEvent })`,
-  report progress with `conn.send(text, { onProgress })`, and run Client
-  Tools with `connect({ tools })`. `submitMessage()`, `waitForResult()` and
-  `turn()` remain over HTTP. The `observe-message.mjs`,
-  `answer-client-tool.mjs` and `device-voice-session.mjs` examples are removed.
+## 0.4.0-rc.0
+
+Release candidate on the `next` dist-tag for service `4305ef67`. Compared with
+0.3.0-rc.0 it removes User API Key authority, Schedulers, every Agent API and
+the per-Session event subscription, creates Sessions directly from a Template,
+and connects Sessions to this process over Backend Connections (service
+ADR 0109).
+
 - Pin the supported contract to service
   `4305ef67daebf23c416badf806217a7c11dcef37` and OpenAPI SHA-256
-  `6f5ff6f025eef80fbd9d5b80fb798e5db159aaa006e7d34866e9c3b6843dfe58`. The
-  Backend Connection now answers the SDK's `ping` liveness probe with
-  `{ time }`, and the Session event stream carries `agent.session.idle` once a
-  Session releases its Turn. Type it as `SessionIdleEvent`;
-  `asKnownSessionEvent()` narrows it. `conn.send()` now resolves only after
-  that release, so a follow-up message, audio Turn or Template switch is not
-  refused as busy. A Turn's result is visible before the release: callers of
-  `session.turn()` or `session.audio()` that start the next Turn or switch the
-  Template right away should wait for the event, or for
-  `session.data.activeTurnId` to become `null`.
-- Add `conn.send(text, options)` to Session connections: it sends a user
-  message over the Backend Connection (`session.send`) and resolves with the
-  `TurnResult` of the Turn it starts or steers. `onProgress` receives the
-  complete draft from pushed events; the settled result is read once over
-  REST. A message whose answer a reconnect lost is sent again with the same
-  `clientEventId`. Refusals raise `BackendRequestError`, now with `details`.
-- Add `conn.realtimeGrant({ audio?, metadata? })`, which returns the WebSocket
-  URL and connect token a device uses to join the Session's Realtime
-  connection, issuing a new token when one is already live. New export:
-  `SendOptions`.
-- Pin the supported contract to service
-  `cadb1144fe2d450d45baf9a09f826a64258b8ada` and OpenAPI SHA-256
-  `901c38fb353ada4bdaf9b27507f54e8455abf3ba3abd950c87c82cfea5c8744e`. The
-  service now serves `session.send` on Backend Connections, passes REST error
-  codes and `details` through `session.send` refusals, and no longer lists
-  Hardware error codes or Session `hardwareIds`. No SDK change.
+  `6f5ff6f025eef80fbd9d5b80fb798e5db159aaa006e7d34866e9c3b6843dfe58`. Since
+  0.3.0-rc.0 the service retired native Hardware, so it no longer lists
+  Hardware error codes or Session `hardwareIds`, and it no longer answers 429
+  `llm_spend_limit_exhausted`.
+
+### Backend Connections
+
+- Add `session.connect(options)`, which attaches a Session to this process's
+  Backend Connection and returns a `SessionConnection`. Callbacks `onEvent`,
+  `onTranscript`, `onResponse` and `onCursor` receive the Session's events in
+  order; `cursor` resumes after a saved event. The SDK keeps one WebSocket per
+  `maxSessions` attachments, re-attaches after a lost or draining connection
+  without gaps or repeats, probes liveness with `ping`, and closes idle
+  connections. `observe: true` attaches for events only. `closed` resolves
+  with why the connection ended (`closed`, `superseded`, `session_deleted` or
+  `error`); `close()` releases the Session and `OrganizationClient.close()`
+  closes every connection. `OrganizationClient` accepts a `WebSocket`
+  constructor.
 - Session connections execute Client Tools: `connect({ tools })` takes a
   handler with `description`, `parameters` and `run(args, context)` per tool
   name. The SDK claims each call and runs it only once the core grants the
   claim, submits the returned value or thrown error as the result over any
-  Backend Connection until the call's deadline, runs each `callId` at most once,
-  and aborts `context.signal` at `deadlineAt`. A refused result reaches
-  `onError` as the new `ClientToolResultRefusedError`.
-- Add `session.connect(options)`, which attaches a Session to this process's
-  Backend Connection (service ADR 0109) and returns a `SessionConnection`.
-  Callbacks `onEvent`, `onTranscript`, `onResponse` and `onCursor` receive the
-  Session's events in order; `cursor` resumes after a saved event. The SDK keeps
-  one WebSocket per `maxSessions` attachments, re-attaches after a lost or
-  draining connection without gaps or repeats, and closes idle connections.
-  `observe: true` attaches for events only. `closed` resolves with why the
-  connection ended (`closed`, `superseded`, `session_deleted` or `error`);
-  `close()` releases the Session and `OrganizationClient.close()` closes every
-  connection. `OrganizationClient` accepts a `WebSocket` constructor. New
-  exports: `SessionConnection`, `ConnectOptions`, `ClientToolHandler`,
-  `ClientToolHandlers`, `ClientToolCallContext`, `RealtimeTranscript`,
-  `RealtimeResponse`, `SessionConnectionEnd`, `BackendWebSocket`,
-  `WebSocketConstructor`, `BackendConnectionClosedError` and
-  `BackendRequestError`.
-- Pin the supported contract to service
-  `89fca0b3ecd4207aa96fea64cfe9ae583b8f21d6` and OpenAPI SHA-256
-  `ea42230bf77c1ba21a2490e5b8a92e0a4ea4bd6acbf284e9d27b771dd3f86756`. The
-  service no longer refuses Turns or audio for an exhausted LLM spend limit, so
-  its 429 `llm_spend_limit_exhausted` answers are gone; the SDK passed them
-  through unchanged and needs no code change. Native Hardware is retired, and
-  Client Tool calls published to a Backend Connection attachment are answered
-  only over that connection, not through `submitClientToolOutput()`.
-- Add `session.switchTemplate({ templateId, idempotencyKey,
-  acknowledgeSessionRecall? })` to move an idle Session to another Template
-  ([#28](https://github.com/mem9-ai/tidblink-sdk/issues/28)). It returns the
-  service's receipt, typed as `TemplateSwitchReceipt` with one variant per
-  `status`: `unchanged`, `succeeded`, or `pending` with the `handoffTurnId` of
-  the Template Handoff Turn; a later read can show `failed` with `error.code`.
-  Follow a pending switch through its Handoff Turn, the
-  `agent.session.template_switch.*` events or `refresh()`; the call does not
-  update `session.data`. After a lost response, repeat the same key and input
-  to recover the receipt. An uncertain outcome raises `OutcomeUnknownError` with
-  `sessionId`; the 503 refusals `turn_admission_closed` and
-  `skill_package_store_unavailable` are definite `TiDBLinkApiError`s.
-  `SwitchTemplateInput`, `TemplateSwitchReceipt` and `TemplateSwitchStatus` are
-  exported. The service contract is unchanged; the frozen `openapi.json`
-  snapshot now includes the switch route.
+  Backend Connection until the call's deadline, runs each `callId` at most
+  once, and aborts `context.signal` at `deadlineAt`. A refused result reaches
+  `onError` as `ClientToolResultRefusedError`.
+- Add `conn.send(text, options)`: it sends a user message over the Backend
+  Connection (`session.send`) and resolves with the `TurnResult` of the Turn it
+  starts or steers, after the Session releases that Turn, so a follow-up
+  message, audio Turn or Template switch is not refused as busy. `onProgress`
+  receives the complete draft from pushed events; the settled result is read
+  once over REST. A message whose answer a reconnect lost is sent again with
+  the same `clientEventId`. Refusals raise `BackendRequestError` with
+  `details`.
+- Add `conn.realtimeGrant({ audio?, metadata? })`, which returns the WebSocket
+  URL and connect token a device uses to join the Session's Realtime
+  connection, issuing a new token when one is already live.
+- Add typed Session events (`KnownSessionEvent` and one type per event,
+  including `SessionIdleEvent` for `agent.session.idle`) and
+  `asKnownSessionEvent`. Unknown events are still delivered unchanged. A
+  Turn's result is visible before the Session releases it: callers of
+  `session.turn()` or `session.audio()` that start the next Turn or switch the
+  Template right away should wait for `agent.session.idle`, or for
+  `session.data.activeTurnId` to become `null`.
+- New exports: `SessionConnection`, `ConnectOptions`, `SendOptions`,
+  `ClientToolHandler`, `ClientToolHandlers`, `ClientToolCallContext`,
+  `RealtimeTranscript`, `RealtimeResponse`, `SessionConnectionEnd`,
+  `BackendWebSocket`, `WebSocketConstructor`, `BackendConnectionClosedError`,
+  `BackendRequestError` and `ClientToolResultRefusedError`.
+- **Breaking:** remove the APIs built on the per-Session event subscription,
+  which Backend Connections replace: `session.events()`, `session.observe()`,
+  `session.listPendingClientToolCalls()`, `session.submitClientToolOutput()`,
+  `ObservationStoppedError` and the types `SessionEventsOptions`,
+  `ObserveTurnOptions`, `TurnObservation`, `PendingClientToolCall` and
+  `ClientToolOutputInput`. Follow events with `session.connect({ onEvent })`,
+  report progress with `conn.send(text, { onProgress })`, and run Client Tools
+  with `connect({ tools })`. `submitMessage()`, `waitForResult()` and `turn()`
+  remain over HTTP.
+- Replace the `observe-message.mjs` and `answer-client-tool.mjs` examples with
+  `lamp-backend.mjs`: the backend of a smart lamp that users talk to by typing
+  or by voice, keeping the lamp's Session connected while it is online,
+  forwarding its Client Tools to the lamp and handing the lamp Realtime
+  grants. The README shows its MQTT wiring and the lamp's firmware in
+  pseudo-code.
 
-## 0.4.0-rc.0
+### Templates, Sessions and Agents
 
-Release candidate on the `next` dist-tag for the service after it retired the
-core Agent. Compared with 0.3.0-rc.0 it removes User API Key authority,
-Schedulers and every Agent API, and creates Sessions directly from a Template.
-
-- Pin the supported contract to service
-  `bc65d6b76928f4b5348302349342309bd24b28ac` and OpenAPI SHA-256
-  `aba1a0e6bd0ebe9ef75483bde11b3cc0e34ba30ee14389bec7d5774f5776e913`.
 - **Breaking:** remove the Agent API, because the service no longer has Agents:
   the `Agent` class, `AgentRecord`, `CreateAgentInput`, `UpdateAgentInput`,
   `EndUserClient.createAgent`, `listAgents` and `getAgent`, and
@@ -116,6 +92,20 @@ Schedulers and every Agent API, and creates Sessions directly from a Template.
   the usage item `agentId`, the attribution counter `agentUsageCount` and the
   attribution kind `agent` are gone. A Realtime Connection without `agentId` is
   now accepted; the previous version rejected every receipt from this service.
+- Add `session.switchTemplate({ templateId, idempotencyKey,
+  acknowledgeSessionRecall? })` to move an idle Session to another Template
+  ([#28](https://github.com/mem9-ai/tidblink-sdk/issues/28)). It returns the
+  service's receipt, typed as `TemplateSwitchReceipt` with one variant per
+  `status`: `unchanged`, `succeeded`, or `pending` with the `handoffTurnId` of
+  the Template Handoff Turn; a later read can show `failed` with `error.code`.
+  Follow a pending switch through its Handoff Turn, the
+  `agent.session.template_switch.*` events or `refresh()`; the call does not
+  update `session.data`. After a lost response, repeat the same key and input
+  to recover the receipt. An uncertain outcome raises `OutcomeUnknownError` with
+  `sessionId`; the 503 refusals `turn_admission_closed` and
+  `skill_package_store_unavailable` are definite `TiDBLinkApiError`s.
+  `SwitchTemplateInput`, `TemplateSwitchReceipt` and `TemplateSwitchStatus` are
+  exported.
 - `listSessions({ templateId })` lists the Sessions currently on a Template,
   and `getUserUsage` / `getUserUsageDetails` accept `templateId`; both send it as
   `agentTemplateId`. `SessionListOptions` is exported.
@@ -132,57 +122,53 @@ Schedulers and every Agent API, and creates Sessions directly from a Template.
   and its CLI accepts `ACKNOWLEDGE_SESSION_RECALL=true`.
 - `createSession` and the `templateId` filters reject a Template ID that is
   empty, longer than 64 characters or padded with whitespace before sending.
-- A Hardware Operation `source` is typed with `hardwareBindingId`, or with
-  `hardwareRequirementId` for historical calls.
+- A Hardware Operation `source` in history is typed with `hardwareBindingId`,
+  or with `hardwareRequirementId` for historical calls.
+- New service fields are typed: `SessionRecord.configurationEpoch` and
+  `switching`, the `template_switch` timeline entry (`SessionTemplateSwitch`),
+  and `realtimeConnectionLive` on Realtime usage items.
+
+### Organization resources
+
+- Add `organization.templates` to create, read, list, replace and archive
+  Organization Templates, and to read the reference catalog of models, Sandbox
+  profiles and Skills they may use.
+- Add `organization.skills` to upload a Skill ZIP, wait for validation, publish
+  or cancel it, and read published Skills and their versions.
 - Add `organization.connectors` to register, list, read, edit, activate and
   deactivate Connectors.
 - Add `verifyConnectorCallback` with a cached `ConnectorKeySet` to verify the
   platform's signed requests to an HTTP Connector, and `readConnectorCallContext`
   with the `ConnectorCallContext` type for the End User and Session of a tool
   call. Add the `http-connector.mjs` example.
-- Add `session.subscribe()`: follows the event stream until aborted, reconnects
-  from the last cursor, and delivers each pending Client Tool call once per
-  subscription, skipping replayed calls that are answered or expired.
-- `events()` and `observe()` end with the new `StreamIdleError` when the stream
-  is silent for `idleTimeoutMs` (default 45 seconds, `0` disables). A connection
-  that drops mid-stream now ends `events()` with a `ConnectionError` instead of
-  the runtime's error.
-- Add typed Session events (`KnownSessionEvent` and one type per event),
-  `asKnownSessionEvent` and the standalone `parseSessionEvent`. Unknown events
-  are still delivered unchanged.
-- Add the `device-voice-session.mjs` example.
-- Add `organization.templates` to create, read, list, replace and archive
-  Organization Templates, and to read the reference catalog of models, Sandbox
-  profiles and Skills they may use.
-- Add `organization.skills` to upload a Skill ZIP, wait for validation, publish
-  or cancel it, and read published Skills and their versions.
-- `OrganizationClient` accepts a `fetch` option. Every request the client
-  makes goes through it, including event streams and file transfers; the
-  default is the global `fetch`. `FetchFunction` is exported.
 - `createEndUser` with an `externalId` is idempotent: the service returns the
   existing End User unchanged, and the SDK retries the call automatically.
   It previously failed with `resource_conflict`; that error now means only an
   `externalId` that differs from an existing one by case or accents.
-- New service fields are typed: `SessionRecord.configurationEpoch` and
-  `switching`, the `template_switch` timeline entry (`SessionTemplateSwitch`),
-  and `realtimeConnectionLive` on Realtime usage items.
-- Contract snapshots are regenerated by `scripts/refresh-contract.mjs` and cover
-  only the Organization routes the SDK calls.
-- Remove Scheduler support: `user.schedulers`, its types and the
-  `schedule-task.mjs` example. Schedulers are leaving the core platform; call the
-  HTTP API directly if you still need them.
-- Internal: request paths are written relative to the Organization or End User
-  scope instead of being rewritten from User-Key routes. Requests on the wire are
-  unchanged.
-- Remove User API Key authority. `UserClient`, `createUserApiKey`,
-  `listUserApiKeys`, `rotateUserApiKey`, `revokeUserApiKey`, the User-Key usage
-  reads (`getUsage`, `getUsageDetails`) and their types are gone. Use
+
+### Authority and client
+
+- **Breaking:** remove User API Key authority. `UserClient`,
+  `createUserApiKey`, `listUserApiKeys`, `rotateUserApiKey`,
+  `revokeUserApiKey`, the User-Key usage reads (`getUsage`, `getUsageDetails`)
+  and their types are gone. Use
   `new OrganizationClient({ baseUrl, apiKey }).user(userId)` for resources and
   `organization.getUserUsage(userId, options)` for usage.
+- **Breaking:** remove Scheduler support: `user.schedulers`, its types and the
+  `schedule-task.mjs` example. Schedulers are leaving the core platform; call
+  the HTTP API directly if you still need them.
+- `OrganizationClient` accepts a `fetch` option. Every HTTP request the client
+  makes goes through it, including file transfers; the default is the global
+  `fetch`. `FetchFunction` is exported.
 - Every packaged example now takes `organizationApiKey` and `userId`
   (`ORGANIZATION_API_KEY` and `END_USER_ID` on the command line). Remove the
   `provision-user.mjs` example and fold `organization-session.mjs` into
   `create-session.mjs`; `read-usage.mjs` exports only `readUserUsage`.
+- Contract snapshots are regenerated by `scripts/refresh-contract.mjs` and cover
+  only the Organization routes the SDK calls.
+- Internal: request paths are written relative to the Organization or End User
+  scope instead of being rewritten from User-Key routes. Requests on the wire are
+  unchanged.
 - Release only from release branches. Merging `main` into `release` submits the
   package version to npm; commits on `main` release nothing.
 
