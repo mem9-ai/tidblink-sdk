@@ -50,7 +50,7 @@ export interface PoolAttachment {
   attachParams(): Record<string, unknown>;
   /** A (re)attach took effect on `link`, which now delivers the Session. */
   attached(result: AttachResult, link: BackendLink): void;
-  /** A notification for this Session from the connection that holds it; `size` is its frame's length. */
+  /** A notification for this Session from the connection that holds it; `size` is its frame's UTF-8 size. */
   notify(method: string, params: Record<string, unknown>, link: BackendLink, size: number): void;
   /** The pool gave the attachment up; called at most once, never after `detach()`. */
   ended(end: AttachmentEnd): void;
@@ -202,16 +202,19 @@ export class BackendConnectionPool {
       this.#wanted.get(attachment.sessionId) === attachment &&
       slot.held.get(attachment.sessionId) === attachment;
     try {
-      const result = await this.#limited(() =>
-        slot.transport.request(
+      const result = await this.#limited(async () => {
+        // Closed or moved while waiting for its turn: nothing to resume.
+        if (!holds()) return undefined;
+        return slot.transport.request(
           "session.attach",
           attachment.attachParams(),
           // The replay may arrive with the answer: take it from the answer on.
           (answer) => {
             if (isAttachResult(answer) && holds()) attachment.attached(answer, slot.transport);
           },
-        ),
-      );
+        );
+      });
+      if (result === undefined) return;
       if (!isAttachResult(result))
         throw new TiDBLinkError("session.attach returned an invalid result");
     } catch (error) {
@@ -222,12 +225,23 @@ export class BackendConnectionPool {
         .request("session.detach", { sessionId: attachment.sessionId })
         .catch(() => undefined);
       this.#maybeIdle(slot);
-      if (isTransient(error)) {
+      const reason = error instanceof BackendRequestError ? error.reason : undefined;
+      if (
+        !(error instanceof BackendRequestError) ||
+        error.code === -32603 ||
+        reason === "connection_full" ||
+        reason === "connection_draining"
+      ) {
+        // Another connection, or a later attempt, may take it.
         void this.#recover(attachment, RECOVERY_JITTER_MS);
         return;
       }
       this.#wanted.delete(attachment.sessionId);
-      safely(() => attachment.ended({ reason: "error", error }));
+      safely(() =>
+        attachment.ended(
+          reason === "session_not_found" ? { reason: "session_deleted" } : { reason: "error", error },
+        ),
+      );
     }
   }
 

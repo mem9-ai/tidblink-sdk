@@ -340,3 +340,53 @@ test("events that arrive together with the attach answer are delivered after con
     ["13", "sess_1"],
   ]);
 });
+
+test("an executing connection never attaches again to catch up", async () => {
+  const server = await start();
+  const delivered = [];
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  await sessionOf(server).connect({
+    tools: lampTools,
+    onEvent: async (event) => {
+      delivered.push(event.cursor);
+      await gate;
+    },
+  });
+  const peer = server.peers[0];
+  const big = "x".repeat(4 * 1024 * 1024);
+  for (let n = 1; n <= 4; n += 1)
+    peer.send(eventFrame(String(10 + n), "agent.session.turn.progress", { text: big }));
+  await until(() => delivered.length === 1);
+  release();
+  await until(() => delivered.length === 4);
+  assert.equal(peer.log.filter((message) => message.method === "session.attach").length, 1);
+});
+
+test("a catch-up the core refuses because the Session is gone ends the connection as deleted", async () => {
+  let attaches = 0;
+  const server = await start({
+    respond: (message) => {
+      if (message.method !== "session.attach") return undefined;
+      attaches += 1;
+      return attaches === 1
+        ? { result: { generation: 4, cursor: "10" } }
+        : { error: { code: -32000, message: "gone", data: { reason: "session_not_found" } } };
+    },
+  });
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const frame = (n) => eventFrame(String(10 + n), "agent.session.turn.progress", { text: "y".repeat(200) });
+  const conn = await sessionOf(server).connect({
+    observe: true,
+    maxBufferedBytes: JSON.stringify(frame(1)).length * 2,
+    onEvent: () => gate,
+  });
+  const peer = server.peers[0];
+  for (let n = 1; n <= 5; n += 1) peer.send(frame(n));
+  await delay(50);
+  release();
+  assert.deepEqual(await conn.closed, { reason: "session_deleted" });
+  assert.equal(attaches, 2);
+  await until(() => peer.log.at(-1)?.method === "session.detach");
+});
