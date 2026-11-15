@@ -132,6 +132,9 @@ test("observing connections and resume cursors are sent as given; invalid option
     { tools: { "bad name": { ...lampTools.set_light } } },
     { tools: [lampTools.set_light] },
     { cursor: "abc" },
+    { observe: true, maxBufferedBytes: 0 },
+    { observe: true, maxBufferedBytes: 1.5 },
+    { maxBufferedBytes: 1024 },
     { onEvent: "nope" },
     { unknown: true },
   ])
@@ -257,4 +260,133 @@ test("OrganizationClient.close() ends its connections as closed and refuses new 
   assert.deepEqual(await conn.closed, { reason: "closed" });
   assert(server.peers[0].log.some((m) => m.method === "session.detach"));
   await assert.rejects(client.user("user_1").session("sess_2").connect(), /closed/);
+});
+
+test("a connection whose callbacks fall behind drops events, then has the core send them again", async () => {
+  // The core stand-in keeps every event it sent, and an attach with a cursor replays those after it.
+  const sent = [];
+  const server = await start({
+    respond: (message, peer) => {
+      if (message.method !== "session.attach") return undefined;
+      const after = BigInt(message.params.cursor ?? "10");
+      setImmediate(() => {
+        for (const frame of sent)
+          if (BigInt(frame.params.cursor) > after) peer.send(frame);
+      });
+      return { result: { generation: 4, cursor: String(sent.length + 10) } };
+    },
+  });
+  const delivered = [];
+  let release;
+  let gate = new Promise((resolve) => (release = resolve));
+  const frame = (n) => eventFrame(String(10 + n), "agent.session.turn.progress", { text: "x".repeat(200) });
+  const size = JSON.stringify(frame(1)).length;
+  const conn = await sessionOf(server).connect({
+    observe: true,
+    maxBufferedBytes: size * 3,
+    onEvent: async (event) => {
+      delivered.push(event.cursor);
+      await gate;
+    },
+  });
+  const peer = server.peers[0];
+  for (let n = 1; n <= 10; n += 1) {
+    sent.push(frame(n));
+    peer.send(frame(n));
+  }
+  await until(() => delivered.length === 1);
+  await delay(50);
+  // Only what fits is waiting; nothing was attached again yet.
+  assert.equal(delivered.length, 1);
+  assert.equal(peer.log.filter((message) => message.method === "session.attach").length, 1);
+  release();
+  gate = Promise.resolve();
+  await until(() => delivered.length === 10);
+  assert.deepEqual(delivered, Array.from({ length: 10 }, (_, n) => String(11 + n)));
+  // Each re-attach resumes after the last event the callbacks completed; the replay itself may
+  // outrun them again.
+  const attaches = peer.log.filter((message) => message.method === "session.attach");
+  assert(attaches.length >= 2);
+  assert.equal(attaches[1].params.cursor, "13");
+  for (const attach of attaches.slice(1)) assert(Number(attach.params.cursor) >= 13);
+  assert.equal(conn.cursor, "20");
+  await conn.close();
+});
+
+test("events that arrive together with the attach answer are delivered after connect() returns", async () => {
+  const server = await start({
+    respond: (message, peer) => {
+      if (message.method !== "session.attach") return undefined;
+      // The answer and the replay leave in one write, as a fast core sends them.
+      peer.send({ jsonrpc: "2.0", id: message.id, result: { generation: 4, cursor: "13" } });
+      for (const cursor of ["11", "12", "13"])
+        peer.send(eventFrame(cursor, "agent.session.turn.progress"));
+      return "silent";
+    },
+  });
+  const delivered = [];
+  // The callbacks run only once connect() has handed over the connection.
+  const conn = await sessionOf(server).connect({
+    observe: true,
+    cursor: "10",
+    onEvent: (event) => {
+      delivered.push([event.cursor, conn.sessionId]);
+    },
+  });
+  await until(() => delivered.length === 3);
+  assert.deepEqual(delivered, [
+    ["11", "sess_1"],
+    ["12", "sess_1"],
+    ["13", "sess_1"],
+  ]);
+});
+
+test("an executing connection never attaches again to catch up", async () => {
+  const server = await start();
+  const delivered = [];
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  await sessionOf(server).connect({
+    tools: lampTools,
+    onEvent: async (event) => {
+      delivered.push(event.cursor);
+      await gate;
+    },
+  });
+  const peer = server.peers[0];
+  const big = "x".repeat(4 * 1024 * 1024);
+  for (let n = 1; n <= 4; n += 1)
+    peer.send(eventFrame(String(10 + n), "agent.session.turn.progress", { text: big }));
+  await until(() => delivered.length === 1);
+  release();
+  await until(() => delivered.length === 4);
+  assert.equal(peer.log.filter((message) => message.method === "session.attach").length, 1);
+});
+
+test("a catch-up the core refuses because the Session is gone ends the connection as deleted", async () => {
+  let attaches = 0;
+  const server = await start({
+    respond: (message) => {
+      if (message.method !== "session.attach") return undefined;
+      attaches += 1;
+      return attaches === 1
+        ? { result: { generation: 4, cursor: "10" } }
+        : { error: { code: -32000, message: "gone", data: { reason: "session_not_found" } } };
+    },
+  });
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const frame = (n) => eventFrame(String(10 + n), "agent.session.turn.progress", { text: "y".repeat(200) });
+  const conn = await sessionOf(server).connect({
+    observe: true,
+    maxBufferedBytes: JSON.stringify(frame(1)).length * 2,
+    onEvent: () => gate,
+  });
+  const peer = server.peers[0];
+  for (let n = 1; n <= 5; n += 1) peer.send(frame(n));
+  await delay(50);
+  release();
+  assert.deepEqual(await conn.closed, { reason: "session_deleted" });
+  assert.equal(attaches, 2);
+  await until(() => peer.log.at(-1)?.method === "session.detach");
 });

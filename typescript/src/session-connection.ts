@@ -99,6 +99,15 @@ export interface ConnectOptions {
   /** Each completed Realtime model response. */
   onResponse?: (response: RealtimeResponse) => void | Promise<void>;
   /**
+   * For an observing connection: most event data, in bytes of the frames
+   * that carried it, that may wait for the callbacks. Past it, the connection
+   * stops taking events and, once the callbacks have caught up, attaches
+   * again from the last event they completed, so the core sends the rest
+   * again. Default 8 MiB. An executing connection queues every event, since
+   * attaching again could take the Session from a newer executor.
+   */
+  maxBufferedBytes?: number;
+  /**
    * Errors that do not end the connection: a callback that threw, an
    * invalid event, a tool result the core did not accept. Without it they
    * are rethrown asynchronously, which by default ends a Node.js process.
@@ -116,6 +125,8 @@ export type SessionConnectionEnd =
   | { reason: "session_deleted" }
   /** The connection could not be restored, for example after the Organization API Key was revoked. */
   | { reason: "error"; error: unknown };
+
+const DEFAULT_MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
 
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
 /** Whether `cursor` is at or before `last`; opaque cursors never compare. */
@@ -146,7 +157,14 @@ export class SessionConnection {
   #link: BackendLink | undefined;
   #ended: SessionConnectionEnd | undefined;
   #settle!: (end: SessionConnectionEnd) => void;
-  #queue: Promise<void> = Promise.resolve();
+  /** Deliveries wait until `connect()` has handed the connection to its caller. */
+  #queue: Promise<void>;
+  #start!: () => void;
+  /** Size of the events waiting for the callbacks. */
+  #buffered = 0;
+  /** Dropping events until an attach replays them from `#cursor`. */
+  #behind = false;
+  readonly #maxBuffered: number;
   readonly #executor: ClientToolExecutor | undefined;
   /** Waiting for the next attach, or for the end. */
   #linkWaiters: { resolve: () => void }[] = [];
@@ -169,6 +187,12 @@ export class SessionConnection {
     this.#options = options;
     this.#declarations = declarations;
     this.#cursor = options.cursor;
+    this.#maxBuffered = options.observe
+      ? (options.maxBufferedBytes ?? DEFAULT_MAX_BUFFERED_BYTES)
+      : Number.POSITIVE_INFINITY;
+    this.#queue = new Promise((resolve) => {
+      this.#start = resolve;
+    });
     this.closed = new Promise((resolve) => {
       this.#settle = resolve;
     });
@@ -185,7 +209,7 @@ export class SessionConnection {
       sessionId,
       attachParams: () => this.#attachParams(),
       attached: (result, link) => this.#attached(result, link),
-      notify: (method, params, link) => this.#notify(method, params, link),
+      notify: (method, params, link, size) => this.#notify(method, params, link, size),
       ended: (end) => this.#end(end),
     };
   }
@@ -280,6 +304,12 @@ export class SessionConnection {
     await this.#pool.attach(this.#attachment);
   }
 
+  /** @internal Start delivering once the caller of `connect()` holds the connection. */
+  start(): void {
+    // After the caller's `await connect()` continues, which takes a few microtasks.
+    setTimeout(() => this.#start(), 0);
+  }
+
   #report(error: unknown): void {
     if (this.#options.onError) {
       try {
@@ -309,6 +339,8 @@ export class SessionConnection {
     this.#generation = result.generation;
     // Without a resume point, delivery starts after the attach position.
     this.#cursor ??= result.cursor;
+    // Every attach replays after `#cursor`, including what was dropped.
+    this.#behind = false;
     this.#wakeLinkWaiters();
   }
 
@@ -370,13 +402,20 @@ export class SessionConnection {
     };
   }
 
-  #notify(method: string, params: Record<string, unknown>, link: BackendLink): void {
+  #notify(
+    method: string,
+    params: Record<string, unknown>,
+    link: BackendLink,
+    size: number,
+  ): void {
     if (this.#ended) return;
     if (method === "tool.call") {
       this.#executor?.receive(params, link);
       return;
     }
     if (method !== "session.event") return;
+    // Dropped events come again with the replay; check them then.
+    if (this.#behind) return;
     let event: SessionEvent;
     try {
       event = sessionEventFrom(params.event, params.cursor, {
@@ -386,8 +425,27 @@ export class SessionConnection {
       this.#queue = this.#queue.then(() => this.#report(error));
       return;
     }
+    if (this.#buffered > 0 && this.#buffered + size > this.#maxBuffered) {
+      // The callbacks fell behind: drop events until they catch up, then
+      // have the core send the rest again.
+      this.#behind = true;
+      this.#queue = this.#queue.then(() => this.#catchUp());
+      return;
+    }
+    this.#buffered += size;
     // One event at a time, so that callbacks and saved cursors follow the Session's order.
-    this.#queue = this.#queue.then(() => this.#deliver(event));
+    this.#queue = this.#queue.then(async () => {
+      try {
+        await this.#deliver(event);
+      } finally {
+        this.#buffered -= size;
+      }
+    });
+  }
+
+  async #catchUp(): Promise<void> {
+    if (this.#ended || !this.#behind) return;
+    await this.#pool.resume(this.#attachment);
   }
 
   async #deliver(event: SessionEvent): Promise<void> {
@@ -432,12 +490,29 @@ export function connectDeclarations(
 ): ClientToolDeclaration[] | undefined {
   requireKnownKeys(
     options,
-    ["tools", "observe", "cursor", "onCursor", "onEvent", "onTranscript", "onResponse", "onError"],
+    [
+      "tools",
+      "observe",
+      "cursor",
+      "maxBufferedBytes",
+      "onCursor",
+      "onEvent",
+      "onTranscript",
+      "onResponse",
+      "onError",
+    ],
     "Session connection options",
   );
   for (const key of ["onCursor", "onEvent", "onTranscript", "onResponse", "onError"] as const)
     if (options[key] !== undefined && typeof options[key] !== "function")
       throw new TypeError(`${key} must be a function`);
+  if (
+    options.maxBufferedBytes !== undefined &&
+    (!Number.isSafeInteger(options.maxBufferedBytes) || options.maxBufferedBytes < 1)
+  )
+    throw new TypeError("maxBufferedBytes must be a positive integer");
+  if (options.maxBufferedBytes !== undefined && !options.observe)
+    throw new TypeError("maxBufferedBytes applies to observing connections only");
   if (options.observe !== undefined && typeof options.observe !== "boolean")
     throw new TypeError("observe must be a boolean");
   if (
@@ -484,5 +559,6 @@ export async function connectSession(
   const declarations = connectDeclarations(options);
   const connection = new SessionConnection(pool, http, userId, sessionId, options, declarations);
   await connection.attach();
+  connection.start();
   return connection;
 }
