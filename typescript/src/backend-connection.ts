@@ -55,7 +55,7 @@ export interface BackendConnectionHello {
 export type BackendNotificationHandler = (
   method: string,
   params: Record<string, unknown>,
-  /** Length of the frame that carried it, in UTF-16 code units. */
+  /** Size of the frame that carried it, in UTF-8 bytes. */
   size: number,
 ) => void;
 
@@ -331,7 +331,7 @@ export class BackendTransport {
       this.#onNotification(
         message.method,
         isObject(message.params) ? message.params : {},
-        (data as string).length,
+        frameBytes(data as string),
       );
       return;
     }
@@ -396,6 +396,12 @@ export class BackendTransport {
     this.#pending.clear();
     this.#settleClosed(error);
   }
+}
+
+/** UTF-8 size of a received frame, without copying it where Node.js's Buffer is available. */
+function frameBytes(text: string): number {
+  const buffer = (globalThis as { Buffer?: { byteLength(text: string): number } }).Buffer;
+  return buffer ? buffer.byteLength(text) : encoder.encode(text).byteLength;
 }
 
 function safeParse(text: string): Record<string, unknown> | undefined {

@@ -188,9 +188,11 @@ export class BackendConnectionPool {
   /**
    * Attach again on the connection that holds the attachment, with its
    * current parameters, so that the core replays the Session's events after
-   * the attachment's cursor. Nothing happens while the attachment is moving
-   * to another connection, whose attach replays the same way. A failed
-   * re-attach is recovered like a lost connection.
+   * the attachment's cursor. Only for observing attachments: an executing
+   * attach could take the Session back from a newer executor. Nothing happens
+   * while the attachment is moving to another connection, whose attach
+   * replays the same way. A transient failure is recovered like a lost
+   * connection; any other ends the attachment.
    */
   async resume(attachment: PoolAttachment): Promise<void> {
     if (this.#wanted.get(attachment.sessionId) !== attachment) return;
@@ -200,21 +202,32 @@ export class BackendConnectionPool {
       this.#wanted.get(attachment.sessionId) === attachment &&
       slot.held.get(attachment.sessionId) === attachment;
     try {
-      const result = await slot.transport.request(
-        "session.attach",
-        attachment.attachParams(),
-        // The replay may arrive with the answer: take it from the answer on.
-        (answer) => {
-          if (isAttachResult(answer) && holds()) attachment.attached(answer, slot.transport);
-        },
+      const result = await this.#limited(() =>
+        slot.transport.request(
+          "session.attach",
+          attachment.attachParams(),
+          // The replay may arrive with the answer: take it from the answer on.
+          (answer) => {
+            if (isAttachResult(answer) && holds()) attachment.attached(answer, slot.transport);
+          },
+        ),
       );
       if (!isAttachResult(result))
         throw new TiDBLinkError("session.attach returned an invalid result");
-    } catch {
+    } catch (error) {
       if (!holds()) return;
       this.#release(slot, attachment.sessionId);
       this.#where.delete(attachment);
-      void this.#recover(attachment, 0);
+      slot.transport
+        .request("session.detach", { sessionId: attachment.sessionId })
+        .catch(() => undefined);
+      this.#maybeIdle(slot);
+      if (isTransient(error)) {
+        void this.#recover(attachment, RECOVERY_JITTER_MS);
+        return;
+      }
+      this.#wanted.delete(attachment.sessionId);
+      safely(() => attachment.ended({ reason: "error", error }));
     }
   }
 

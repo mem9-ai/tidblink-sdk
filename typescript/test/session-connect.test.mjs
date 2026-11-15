@@ -132,8 +132,9 @@ test("observing connections and resume cursors are sent as given; invalid option
     { tools: { "bad name": { ...lampTools.set_light } } },
     { tools: [lampTools.set_light] },
     { cursor: "abc" },
-    { maxBufferedBytes: 0 },
-    { maxBufferedBytes: 1.5 },
+    { observe: true, maxBufferedBytes: 0 },
+    { observe: true, maxBufferedBytes: 1.5 },
+    { maxBufferedBytes: 1024 },
     { onEvent: "nope" },
     { unknown: true },
   ])
@@ -312,7 +313,7 @@ test("a connection whose callbacks fall behind drops events, then has the core s
   await conn.close();
 });
 
-test("events that arrive together with the attach answer are delivered", async () => {
+test("events that arrive together with the attach answer are delivered after connect() returns", async () => {
   const server = await start({
     respond: (message, peer) => {
       if (message.method !== "session.attach") return undefined;
@@ -324,13 +325,18 @@ test("events that arrive together with the attach answer are delivered", async (
     },
   });
   const delivered = [];
-  await sessionOf(server).connect({
+  // The callbacks run only once connect() has handed over the connection.
+  const conn = await sessionOf(server).connect({
     observe: true,
     cursor: "10",
     onEvent: (event) => {
-      delivered.push(event.cursor);
+      delivered.push([event.cursor, conn.sessionId]);
     },
   });
   await until(() => delivered.length === 3);
-  assert.deepEqual(delivered, ["11", "12", "13"]);
+  assert.deepEqual(delivered, [
+    ["11", "sess_1"],
+    ["12", "sess_1"],
+    ["13", "sess_1"],
+  ]);
 });
