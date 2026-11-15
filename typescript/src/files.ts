@@ -126,7 +126,7 @@ export class FileUploadOutcomeUnknownError extends OutcomeUnknownError {
 }
 
 const uploadPath = (id: string) =>
-  `/api/v1/user/drive/uploads/${encodeURIComponent(id)}`;
+  `/drive/uploads/${encodeURIComponent(id)}`;
 const digest = async (bytes: Uint8Array) => {
   const value = new Uint8Array(
     await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes)),
@@ -209,7 +209,7 @@ export class UserFiles {
     options = requestOptions(options);
     return (
       await this.#http.get<{ capabilities: FileUploadCapabilities }>(
-        "/api/v1/user/drive/upload-capabilities",
+        "/drive/upload-capabilities",
         options,
       )
     ).capabilities;
@@ -254,7 +254,7 @@ export class UserFiles {
       );
     const { idempotencyKey, signal, requestId, ...body } = input;
     const result = await this.#http.postResponse<{ upload?: FileUpload }>(
-      "/api/v1/user/drive/uploads",
+      "/drive/uploads",
       body,
       {
         idempotencyKey,
@@ -396,7 +396,7 @@ export class UserFiles {
     init.signal?.throwIfAborted();
     let response: Response;
     try {
-      response = await fetch(destination, { ...init, redirect: "error" });
+      response = await this.#http.fetch(destination, { ...init, redirect: "error" });
     } catch {
       throw new OutcomeUnknownError(
         "File transfer outcome is unknown; inspect the original upload",
@@ -554,7 +554,7 @@ export class UserFiles {
     if (options.limit !== undefined) query.set("limit", String(options.limit));
     if (options.cursor !== undefined) query.set("cursor", options.cursor);
     return this.#http.get(
-      `/api/v1/files${query.size ? `?${query}` : ""}`,
+      `/files${query.size ? `?${query}` : ""}`,
       options,
     );
   }
@@ -563,7 +563,7 @@ export class UserFiles {
     options = requestOptions(options);
     return (
       await this.#http.get<{ file: UserFile }>(
-        `/api/v1/files/${encodeURIComponent(fileId)}`,
+        `/files/${encodeURIComponent(fileId)}`,
         options,
       )
     ).file;
@@ -575,7 +575,7 @@ export class UserFiles {
   ): Promise<FileContent> {
     options = requestOptions(options);
     const { response, requestId } = await this.#http.rawResponse(
-      `/api/v1/files/${encodeURIComponent(fileId)}/content`,
+      `/files/${encodeURIComponent(fileId)}/content`,
       options,
     );
     const contentType =
@@ -622,7 +622,7 @@ export class UserFiles {
     options?.signal?.throwIfAborted();
     let response: Response;
     try {
-      response = await fetch(destination, {
+      response = await this.#http.fetch(destination, {
         redirect: "manual",
         ...(options?.signal ? { signal: options.signal } : {}),
       });
@@ -636,7 +636,7 @@ export class UserFiles {
         destination = transferUrl(new URL(location, destination));
         if (destination.protocol !== "https:")
           throw new TiDBLinkError("File download redirect requires HTTPS");
-        response = await fetch(destination, {
+        response = await this.#http.fetch(destination, {
           redirect: "error",
           ...(options?.signal ? { signal: options.signal } : {}),
         });

@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, test } from "node:test";
 import {
-  UserClient,
+  OrganizationClient,
   TurnFailedError,
   TurnInterruptedError,
   OutcomeUnknownError,
   TiDBLinkApiError,
 } from "../dist/index.js";
-const apiKey = "ti_user_audio_" + "x".repeat(43);
+const apiKey = "ti_org_audio_" + "x".repeat(43);
 const servers = [];
 after(async () =>
   Promise.all(
@@ -31,7 +31,7 @@ const event = (name, payload, seq = 0, turnId = "turn-audio") => ({
 });
 const frame = (e) => `event: ${e.event}\ndata: ${JSON.stringify(e)}\n\n`;
 const sessionAt = (baseUrl) =>
-  new UserClient({ baseUrl, apiKey }).session("session-audio");
+  new OrganizationClient({ baseUrl, apiKey }).user("user_1").session("session-audio");
 const input = () => ({
   bytes: new Uint8Array([1, 2, 3, 4]),
   filename: "recording.wav",
@@ -41,7 +41,7 @@ const input = () => ({
 test("prerecorded audio sends multipart bytes and JSON billing metadata and waits for its own terminal result", async () => {
   const baseUrl = await serve(async (req, res) => {
     assert.equal(req.method, "POST");
-    assert.equal(req.url, "/api/v1/user/sessions/session-audio/turns/audio");
+    assert.equal(req.url, "/api/v1/org/users/user_1/sessions/session-audio/turns/audio");
     assert.equal(req.headers.authorization, `Bearer ${apiKey}`);
     assert.equal(req.headers["idempotency-key"], undefined);
     const bytes = Buffer.concat(await Array.fromAsync(req));
@@ -107,6 +107,57 @@ test("audio progress preserves fragmented SSE envelopes and complete draft snaps
   assert.deepEqual(
     await Array.fromAsync(sessionAt(baseUrl).streamAudio(input())),
     events,
+  );
+});
+
+test("audio Turns deliver the Client Tool calls they publish and refuse malformed ones", async () => {
+  const calls = [
+    {
+      callId: "call_1",
+      name: "set_light",
+      arguments: { on: true },
+      deadlineAt: "2099-01-01T00:00:00.000Z",
+    },
+    {
+      callId: "call_2",
+      name: "get_status",
+      arguments: {},
+      deadlineAt: "2099-01-01T00:00:00.000Z",
+      claimBy: "2099-01-01T00:00:00.000Z",
+    },
+  ];
+  const events = [
+    event("turn_started", {}),
+    event("client_tool_calls", { calls }, 1),
+    event("assistant_message", { messageId: "m1", text: "Done" }, 2),
+    event("turn_finished", { status: "succeeded" }, 3),
+  ];
+  const respond = (body) =>
+    serve(async (req, res) => {
+      for await (const _ of req) {
+      }
+      res.writeHead(201, { "content-type": "text/event-stream" });
+      res.end(body);
+    });
+  assert.deepEqual(
+    await Array.fromAsync(
+      sessionAt(await respond(events.map(frame).join(""))).streamAudio(input()),
+    ),
+    events,
+  );
+  assert.equal(
+    (await sessionAt(await respond(events.map(frame).join(""))).audio(input())).text,
+    "Done",
+  );
+  const malformed = await respond(
+    frame(event("turn_started", {})) +
+      frame(event("client_tool_calls", { calls: [{ callId: "call_1" }] }, 1)),
+  );
+  await assert.rejects(
+    Array.fromAsync(sessionAt(malformed).streamAudio(input())),
+    (error) =>
+      error instanceof OutcomeUnknownError &&
+      /invalid Client Tool calls/.test(error.cause?.message ?? error.message),
   );
 });
 

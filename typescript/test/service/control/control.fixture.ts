@@ -10,6 +10,7 @@ import {
 import { setTimeout } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
@@ -20,7 +21,7 @@ import {
 } from "../test/support/app-testing-module";
 import { loadE2eEnv } from "../test/support/e2e-env";
 import { developmentReleaseServices } from "../test/support/ops-release-fixture";
-import { createPublishedFixtureAgent } from "../test/support/published-agent-creation";
+import { seedFixtureTemplate } from "../test/support/published-template-fixture";
 import {
   ControlledIntegrationProvider,
   CONTROLLED_INTEGRATION_VALUES,
@@ -34,7 +35,7 @@ import {
   piAgentRuntimeConfigFromEnv,
 } from "../src/config/runtime-config";
 import { AGENT_MODEL_NAMES } from "../src/agent-models/agent-model-registry";
-import { UserApiKeyService } from "../src/auth/user-api-key.service";
+import { OrganizationApiKeyService } from "../src/auth/organization-api-key.service";
 import { DEFAULT_ORG_ID } from "../src/chat/dto";
 import { CHECKPOINT_FS_PORT } from "../src/checkpoint/checkpoint-port";
 import { Drive9CheckpointFsPort } from "../src/checkpoint/drive9-checkpoint-fs.port";
@@ -140,14 +141,18 @@ it("the installed SDK explicitly retries through enabled checkpoint admission an
     organizationId: DEFAULT_ORG_ID,
     displayName: "SDK retry owner",
   });
-  const key = await app.get(UserApiKeyService).create({
+  const key = await app.get(OrganizationApiKeyService).create({
     organizationId: DEFAULT_ORG_ID,
-    userId: owner.userId,
     name: "SDK retry",
+    createdByUserId: null,
   });
-  const agent = await createPublishedFixtureAgent(
-    getAppPersistencePorts(app).agentStore,
-    { organizationId: DEFAULT_ORG_ID, userId: owner.userId },
+  const templateId = await seedFixtureTemplate(
+    getAppPersistencePorts(app).templateStore,
+    {
+      organizationId: DEFAULT_ORG_ID,
+      templateId: `template_${randomUUID().replaceAll("-", "")}`,
+      name: "SDK retry",
+    },
   );
   temporary = await mkdtemp(path.join(tmpdir(), "sdk-retry-consumer-"));
   const packed = JSON.parse(
@@ -217,8 +222,9 @@ it("the installed SDK explicitly retries through enabled checkpoint admission an
         env: {
           ...process.env,
           SDK_SERVICE_URL: await app.getUrl(),
-          SDK_USER_KEY: key.token,
-          SDK_RETRY_AGENT_ID: agent.agentId,
+          SDK_ORGANIZATION_KEY: key.token,
+          SDK_USER_ID: owner.userId,
+          SDK_RETRY_TEMPLATE_ID: templateId,
           SDK_RETRY_PAUSED_FILE: pausedFile,
           SDK_RETRY_OBSERVED_DRAFT_FILE: observedDraftFile,
         },

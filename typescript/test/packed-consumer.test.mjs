@@ -27,18 +27,15 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
   assert(files.includes("package.json"));
   assert(files.includes("dist/index.js"));
   assert(files.includes("dist/index.d.ts"));
-  assert(files.includes("examples/provision-user.mjs"));
   assert(files.includes("examples/prepare-realtime-connection.mjs"));
   assert(files.includes("examples/create-session.mjs"));
-  assert(files.includes("examples/organization-session.mjs"));
   assert(files.includes("examples/send-message.mjs"));
   assert(files.includes("examples/read-usage.mjs"));
   assert(files.includes("examples/control-turn.mjs"));
+  assert(files.includes("examples/http-connector.mjs"));
+  assert(files.includes("examples/lamp-backend.mjs"));
   assert(files.includes("examples/upload-file.mjs"));
-  assert(files.includes("examples/schedule-task.mjs"));
   assert(files.includes("examples/submit-audio.mjs"));
-  assert(files.includes("examples/observe-message.mjs"));
-  assert(files.includes("examples/answer-client-tool.mjs"));
   assert(!files.some((file) => file.includes("workspace")));
   assert(
     files.every(
@@ -46,18 +43,15 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
         file === "LICENSE" ||
         file === "README.md" ||
         file === "package.json" ||
-        file === "examples/provision-user.mjs" ||
         file === "examples/prepare-realtime-connection.mjs" ||
         file === "examples/create-session.mjs" ||
-        file === "examples/organization-session.mjs" ||
         file === "examples/send-message.mjs" ||
         file === "examples/read-usage.mjs" ||
+        file === "examples/http-connector.mjs" ||
+        file === "examples/lamp-backend.mjs" ||
         file === "examples/control-turn.mjs" ||
         file === "examples/upload-file.mjs" ||
-        file === "examples/schedule-task.mjs" ||
         file === "examples/submit-audio.mjs" ||
-        file === "examples/observe-message.mjs" ||
-        file === "examples/answer-client-tool.mjs" ||
         /^dist\/.+\.(?:js|d\.ts|map)$/.test(file),
     ),
   );
@@ -80,19 +74,22 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
     path.join(temporary, "consumer.ts"),
     `import type {
       AudioTurnInput, AudioTurnEvent, AudioTurnResult,
-      Scheduler, SchedulerResponse, SchedulerFirePage, SchedulerPage, CreateSchedulerInput,
       UserFile, FileUploadCapabilities, FileUpload, FileUploadStatus,
       FileUploadPart, UploadedFilePart, FilePage, FileContent, FileDownloadGrant,
-      Agent, EndUserClient, BillingPrincipalBucket,
-      AgentRecord,
+      EndUserClient, BillingPrincipalBucket,
       AgentTemplatePage,
       AgentModelCatalog,
       SessionPage,
       CreateSessionOptions,
+      SessionListOptions,
+      SessionSandboxSelection,
+      SwitchTemplateInput,
+      TemplateSwitchReceipt,
+      TemplateSwitchStatus,
+      TurnRecord,
+      OperationRecord,
       Organization,
       EndUser,
-      IssuedUserApiKey,
-      UserApiKey,
       Session,
       RealtimeAudioFormats,
       RealtimeConnectGrant,
@@ -107,19 +104,21 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       SessionTimelinePage,
       TurnPage,
       WaitForResultOptions,
-      UserUsageSummary, UserUsageDetails, UserUsageOptions,
       OrganizationUserUsageSummary, OrganizationUserUsageDetails,
       OrganizationUserUsageOptions, OrganizationUserUsageDetailsOptions,
       TurnCommandInput,
       RetryReceipt,
-      SessionEvent, SessionEventsOptions, ObserveTurnOptions, TurnObservation,
-      ClientToolDeclaration, ClientToolSet, ReplaceClientToolsOptions, PendingClientToolCall, ClientToolOutputInput,
+      SessionEvent, SessionIdleEvent,
+      ClientToolDeclaration, ClientToolSet, ReplaceClientToolsOptions,
+      ConnectOptions, ClientToolHandlers, SendOptions, SessionConnectionEnd, SessionConnection,
+      Template, TemplateContent, TemplateCatalog, TemplatePage, SkillUpload, SkillDetail,
+      KnownSessionEvent,
+      Connector, ConnectorCallbackClaims, ConnectorCallContext,
     } from "@tidblink/server";
     import {
       TIDB_LINK_API_VERSION,
       TIDB_LINK_REVISION,
       OutcomeUnknownError,
-      ObservationStoppedError,
       TurnWaitTimeoutError,
       TurnFailedError,
       TurnInterruptedError,
@@ -127,23 +126,39 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       TiDBLinkApiError,
       TiDBLinkError,
       OrganizationClient,
-      UserClient,
+      asKnownSessionEvent,
+      ConnectorKeySet,
+      verifyConnectorCallback,
+      readConnectorCallContext,
     } from "@tidblink/server";
     // @ts-expect-error Previous compatibility constants and error exports have no aliases.
     import { AGENT_SERVICE_API_VERSION, AGENT_SERVICE_REVISION, AgentStackError, AgentStackApiError } from "@tidblink/server";
     // @ts-expect-error Workspace authority was removed from the supported SDK.
     import { WorkspaceClient } from "@tidblink/server";
+    // @ts-expect-error User API Key authority was removed from the supported SDK.
+    import { UserClient } from "@tidblink/server";
+    // @ts-expect-error The core Agent was retired; Sessions are created from a Template.
+    import { Agent } from "@tidblink/server";
+    // @ts-expect-error Agent records were retired with the core Agent.
+    import type { AgentRecord, CreateAgentInput, UpdateAgentInput } from "@tidblink/server";
 
     declare const baseUrl: string;
     declare const organizationApiKey: string;
     const organization = new OrganizationClient({ baseUrl, apiKey: organizationApiKey });
     const owner: EndUserClient = organization.user("user_1");
-    const orgAgent: Promise<Agent> = owner.getAgent("agent_1");
-    const deleted: Promise<SchedulerPage> = owner.schedulers.list({ status: "deleted" });
+    // @ts-expect-error The core Agent was retired.
+    owner.getAgent("agent_1");
+    // @ts-expect-error The core Agent was retired.
+    owner.listAgents();
+    // @ts-expect-error The core Agent was retired.
+    owner.createAgent({ agentTemplateId: "template_1", idempotencyKey: "agent-1" });
+    // @ts-expect-error The core Agent was retired, and with it the Organization unlink.
+    organization.unlinkAgent("user_1", "agent_1");
+    // @ts-expect-error Schedulers are not part of the supported SDK.
+    owner.schedulers.list();
     const principal: BillingPrincipalBucket = "organization_user";
-    // @ts-expect-error User-Key Scheduler lists do not accept deleted history.
-    new UserClient({ baseUrl, apiKey: "unused" }).schedulers.list({ status: "deleted" });
-    declare const userApiKey: string;
+    // @ts-expect-error User API Key management was removed with User authority.
+    organization.createUserApiKey("user_1", { name: "backend" });
     async function provisionEndUser(): Promise<EndUser> {
       const current: Organization = await organization.getOrganization();
       const created: EndUser = await organization.createEndUser({
@@ -151,26 +166,81 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       });
       const users: EndUser[] = await organization.listEndUsers();
       const found: EndUser = await organization.getEndUser(created.userId);
-      const issued: IssuedUserApiKey = await organization.createUserApiKey(created.userId, { name: "backend" });
-      const keys: UserApiKey[] = await organization.listUserApiKeys(created.userId);
-      const rotated: IssuedUserApiKey = await organization.rotateUserApiKey(issued.apiKey.apiKeyId);
-      const revoked: UserApiKey = await organization.revokeUserApiKey(rotated.apiKey.apiKeyId);
-      void current; void users; void keys; void revoked;
+      void current; void users;
       return found;
     }
-    async function clientToolsWorkflow(session: Session, agent: Agent) {
+    async function managementWorkflow(zipBytes: Uint8Array): Promise<Template> {
+      const catalog: TemplateCatalog = await organization.templates.catalog();
+      const content: TemplateContent = {
+        identity: { agentName: "Ava" },
+        sandbox: { profileId: catalog.sandboxes[0]!.id },
+        realtime: { language: "en-US" },
+      };
+      const created: Template = await organization.templates.create({ displayName: "Ava", content, idempotencyKey: "template-1" });
+      const page: TemplatePage = await organization.templates.list({ lifecycleStatus: "active" });
+      // @ts-expect-error Replacement requires the ETag and an idempotency key.
+      await organization.templates.replace(created.template.id, { displayName: "Ava", content }, {});
+      const upload: SkillUpload = await organization.skills.upload({ bytes: zipBytes, idempotencyKey: "skill-1" });
+      const done: SkillUpload = await organization.skills.waitForUpload(upload.uploadId, { until: ["done"] });
+      const detail: SkillDetail = await organization.skills.get(done.skillId);
+      void page; void detail;
+      return organization.templates.archive(created.template.id, { ifMatch: created.template.etag, idempotencyKey: "archive-1" });
+    }
+    async function connectorWorkflow(authorization: string, meta: unknown): Promise<string> {
+      const registered: Connector = await organization.connectors.register({ displayName: "Orders", endpointUrl: "https://orders.example.com/mcp" });
+      const active: Connector = await organization.connectors.activate(registered.connectorId, { expectedConnectorVersion: registered.connectorVersion });
+      // @ts-expect-error Changes require the expected version.
+      await organization.connectors.deactivate(active.connectorId, {});
+      const keys = new ConnectorKeySet({ baseUrl });
+      const claims: ConnectorCallbackClaims = await verifyConnectorCallback(authorization, { keys, organizationId: "org", connectorId: active.connectorId });
+      const context: ConnectorCallContext = readConnectorCallContext(meta, { organizationId: claims.organizationId });
+      const attempt: 1 = context.attempt;
+      void attempt;
+      return context.userId;
+    }
+    async function connectionWorkflow(session: Session) {
+      const tools: ClientToolHandlers = {
+        set_light: {
+          description: "Turn the lamp on or off",
+          parameters: { type: "object", properties: { on: { type: "boolean" } } },
+          run: async (args, context) => { const signal: AbortSignal = context.signal; void signal; return args.on ? "on" : "off"; },
+        },
+      };
+      const options: ConnectOptions = {
+        tools,
+        cursor: "12",
+        onCursor: async (cursor: string) => { void cursor; },
+        onTranscript: (transcript) => { const text: string = transcript.text; void text; },
+        onEvent: (event: SessionEvent) => {
+          const known: KnownSessionEvent | undefined = asKnownSessionEvent(event);
+          if (known?.type === "agent.session.turn.requires_action") { const callId: string = known.data.payload.calls[0]!.callId; void callId; }
+          if (known?.type === "agent.session.idle") { const idle: SessionIdleEvent = known; const turnId: string | null = idle.data.turnId; void turnId; }
+        },
+      };
+      const conn: SessionConnection = await session.connect(options);
+      const send: SendOptions = { clientEventId: "msg-1", onProgress: (draft: string) => { void draft; } };
+      const reply: TurnResult = await conn.send("Too bright", send);
+      const grant = await conn.realtimeGrant({ metadata: { device: "lamp-1" } });
+      const token: string = grant.connectToken;
+      const end: SessionConnectionEnd = await conn.closed;
+      if (end.reason === "error") { const cause: unknown = end.error; void cause; }
+      // @ts-expect-error observe is a boolean.
+      await session.connect({ observe: "yes" });
+      // @ts-expect-error The SSE subscription APIs are removed; use connect().
+      session.subscribe();
+      // @ts-expect-error The SSE event stream is removed; use connect({ onEvent }).
+      session.events();
+      // @ts-expect-error REST Client Tool results are removed; tools run on a connection.
+      session.submitClientToolOutput({});
+      void reply; void token;
+    }
+    async function clientToolsWorkflow(session: Session, user: EndUserClient) {
       const tool: ClientToolDeclaration = {type:"function",name:"lookup_order",description:"Read an order",parameters:{type:"object",properties:{orderId:{type:"string"}}}};
-      const created: Session = await agent.createSession({idempotencyKey:"tools-session",tools:[tool]});
+      const created: Session = await user.createSession({templateId:"template_1",idempotencyKey:"tools-session",tools:[tool]});
       const set: ClientToolSet = await session.getClientTools();
       const options: ReplaceClientToolsOptions = {ifMatch:set.etag};
       const replaced: ClientToolSet = await session.replaceClientTools([],options);
-      const calls: PendingClientToolCall[] = await session.listPendingClientToolCalls();
-      const input: ClientToolOutputInput = {clientEventId:"output-1",turnId:calls[0]!.turnId,callId:calls[0]!.callId,output:"shipped"};
-      const receipt: SessionInteraction = await session.submitClientToolOutput(input);
-      await session.submitClientToolOutput({clientEventId:"failure-1",turnId:input.turnId,callId:input.callId,error:{message:"Unavailable"}});
-      // @ts-expect-error A result is either output or error.
-      const invalid: ClientToolOutputInput = {clientEventId:"bad",turnId:"turn",callId:"call",output:"ok",error:{message:"failed"}};
-      void created; void replaced; void receipt; void invalid;
+      void created; void replaced;
     }
     async function controlWorkflow(session: Session): Promise<TurnResult> {
       const input: TurnCommandInput = { clientEventId: "cancel-command", turnId: "turn" };
@@ -189,22 +259,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       session.audio({...input,clientEventId:"text-only"});
       return session.audio(input);
     }
-    async function schedulerWorkflow(user: UserClient): Promise<Scheduler> {
-      const input: CreateSchedulerInput = {agentId:"agent-1",title:"Report",prompt:"Summarize",schedule:{kind:"once",after:"1h"},idempotencyKey:"scheduler-1"};
-      const created: SchedulerResponse = await user.schedulers.create(input);
-      const bound: CreateSchedulerInput = {delivery:{target:"bound_session",sessionId:"session-1"},title:"Report",prompt:"Summarize",schedule:{kind:"cron",cronExpr:"0 9 * * *",timezone:"Asia/Shanghai"},idempotencyKey:"scheduler-2"};
-      await user.schedulers.create(bound);
-      // @ts-expect-error A once schedule takes exactly one time form.
-      const invalid: CreateSchedulerInput = {...input,schedule:{kind:"once",after:"1h",runAt:"2099-01-01T00:00:00.000Z"}};
-      const current = await user.schedulers.get(created.scheduler.schedulerId);
-      const updated = await user.schedulers.update(current.scheduler.schedulerId,{enabled:false,validUntil:null},{ifMatch:current.etag});
-      const list: SchedulerPage = await user.schedulers.list({status:"disabled",limit:1});
-      const fires: SchedulerFirePage = await user.schedulers.fires(current.scheduler.schedulerId,{limit:1});
-      await user.schedulers.delete(current.scheduler.schedulerId,{ifMatch:updated.etag});
-      void invalid; void list; void fires;
-      return current.scheduler;
-    }
-    async function fileWorkflow(user: UserClient): Promise<UserFile> {
+    async function fileWorkflow(user: EndUserClient): Promise<UserFile> {
       const capabilities: FileUploadCapabilities = await user.files.capabilities();
       const intent: FileUpload = await user.files.createUpload({originalName:"empty", byteSize:0, sha256:"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", contentType:null,idempotencyKey:"empty-file"});
       const status: FileUploadStatus = await user.files.getUpload(intent.uploadId);
@@ -219,66 +274,84 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       void capabilities; void status; void page;
       return user.files.upload({originalName:"empty",bytes:new Uint8Array(),idempotencyKey:"another-file"});
     }
-    async function progressWorkflow(session: Session) {
-      const options: SessionEventsOptions = {cursor: "saved-position"};
-      for await (const event of session.events(options)) {
-        const typed: SessionEvent = event;
-        void typed;
-      }
-      const observation: ObserveTurnOptions = {timeoutMs: 15000};
-      for await (const update of session.observe("original-input", observation)) {
-        const typed: TurnObservation = update;
-        if (typed.type === "draft" || typed.type === "progress") {const text: string = typed.text; void text;}
-        if (typed.type === "result") {const result: TurnResult = typed.result; void result;}
-      }
-      const stopped = new ObservationStoppedError("Stopped", {sessionId: session.id, inputId: "original-input", cursor: "saved-position"});
-      const cursor: string | undefined = stopped.cursor;
-      void cursor;
-    }
     async function usageWorkflow() {
-      const user = new UserClient({baseUrl, apiKey: userApiKey});
-      const options: UserUsageOptions = {from:"2030-01-02",to:"2030-01-02"};
-      const own: UserUsageSummary = await user.getUsage(options);
-      const details: UserUsageDetails = await user.getUsageDetails({...options,limit:1});
-      const range: OrganizationUserUsageOptions = {from:"2030-01-02T00:00:00.000Z",to:"2030-01-03T00:00:00.000Z",interval:"hour"};
+      const range: OrganizationUserUsageOptions = {from:"2030-01-02T00:00:00.000Z",to:"2030-01-03T00:00:00.000Z",interval:"hour",templateId:"template_1"};
       const target: OrganizationUserUsageSummary = await organization.getUserUsage("user_1",range);
       const pageOptions: OrganizationUserUsageDetailsOptions = {from:range.from,to:range.to,kind:"llm",limit:1};
       const page: OrganizationUserUsageDetails = await organization.getUserUsageDetails("user_1",pageOptions);
       const cost: number | null | undefined = page.items[0]?.costMicros;
       const cursor: string | null = page.nextCursor;
-      // @ts-expect-error User usage has no other User selector or cursor.
-      await user.getUsageDetails({userId:"other",cursor:"unsupported"});
+      // @ts-expect-error Usage is read through the Organization client with an explicit target.
+      await owner.getUsage(range);
       // @ts-expect-error Organization aggregate requires an explicit target User.
       await organization.getUserUsage(range);
-      void own;void details;void target;void cost;void cursor;
+      void target;void cost;void cursor;
     }
     async function lifecycleWorkflow(): Promise<Session> {
-      const user = new UserClient({ baseUrl, apiKey: userApiKey });
+      const user = owner;
       const templates: AgentTemplatePage = await user.listAgentTemplates({limit:1});
       const models: AgentModelCatalog = await user.listModels();
-      const agent: Agent = await user.createAgent({agentTemplateId:templates.templates[0]!.agentTemplateId,idempotencyKey:"agent-1"});
-      await agent.update({additionalInstructions:"Concise"});
-      const options: CreateSessionOptions = {idempotencyKey:"session-1",model:models.effectiveDefaultModel};
-      const session: Session = await agent.createSession(options);
+      const sandbox: SessionSandboxSelection = {profileId:null,workingDirectory:"work"};
+      const options: CreateSessionOptions = {templateId:templates.templates[0]!.agentTemplateId,idempotencyKey:"session-1",model:models.effectiveDefaultModel,additionalInstructions:"Concise",sandbox,acknowledgeSessionRecall:true};
+      const session: Session = await user.createSession(options);
       await session.rename("My Session");
       await session.suggestName({userText:"Hello"});
       await session.setBillingTag({key:"account",value:"customer"});
       await session.setModel("dynamic.model");
-      const page: SessionPage = await user.listSessions({limit:1});
-      const archived: AgentRecord = await organization.unlinkAgent(agent.data.ownerUserId,agent.id);
+      const listOptions: SessionListOptions = {limit:1,templateId:"template_1"};
+      const page: SessionPage = await user.listSessions(listOptions);
       // @ts-expect-error Retired Template versions are not creation selectors.
-      user.createAgent({agentTemplateId:"template_1",idempotencyKey:"a",templateVersion:1});
-      // @ts-expect-error Agent creation requires a recoverable identity.
-      user.createAgent({agentTemplateId:"template_1"});
+      user.createSession({templateId:"template_1",idempotencyKey:"a",templateVersion:1});
       // @ts-expect-error Session creation requires a recoverable identity.
-      agent.createSession();
-      // @ts-expect-error Memory and general config overrides are retired.
-      agent.configure({memory:{enabled:true}});
-      void page; void archived;
+      user.createSession({templateId:"template_1"});
+      // @ts-expect-error Session creation requires an explicit Template; there is no default.
+      user.createSession({idempotencyKey:"s"});
+      // @ts-expect-error Sessions are no longer created from an Agent.
+      user.createSession({agentId:"agent_1",idempotencyKey:"s"});
+      // @ts-expect-error Native Hardware binding is not part of the SDK.
+      user.createSession({templateId:"template_1",idempotencyKey:"s",hardwareIds:["hw_1"]});
+      // @ts-expect-error Models no longer depend on an Agent.
+      user.listModels({agentId:"agent_1"});
+      const turns: TurnPage = await session.history();
+      const bound: NonNullable<OperationRecord["source"]> = {type:"hardware",method:"turn_on",hardwareBindingId:"hb_1"};
+      const historical: NonNullable<OperationRecord["source"]> = {type:"hardware",method:"turn_on",hardwareRequirementId:"lamp"};
+      void bound; void historical;
+      for (const turn of turns.turns as TurnRecord[]) {
+        // @ts-expect-error A Template Handoff Turn has no user Message; narrow on kind first.
+        void turn.userMessage.content;
+        if (turn.kind === "template_handoff") { const target: string = turn.agentTemplateId; void target; }
+        else { const text: string = turn.userMessage.content; const frozen: string | null = turn.agentTemplateId; void text; void frozen; }
+      }
+      // The README's switch example, as written.
+      const nextTemplateId = "template_2"; const switchKey = "switch-1";
+      const receipt = await session.switchTemplate({
+        templateId: nextTemplateId,
+        idempotencyKey: switchKey,
+      });
+      if (receipt.status === "pending") {
+        const handoff = await session.getTurn(receipt.handoffTurnId);
+        if (handoff.status !== "running") await session.refresh();
+      } else if (receipt.status === "failed") {
+        console.warn(receipt.error.code);
+      }
+      const switchInput: SwitchTemplateInput = {templateId:"template_2",idempotencyKey:"switch-1",acknowledgeSessionRecall:true};
+      const switched: TemplateSwitchReceipt = await session.switchTemplate(switchInput);
+      const switchStatus: TemplateSwitchStatus = switched.status;
+      const pendingHandoff: string = switched.status === "pending" ? switched.handoffTurnId : "";
+      // @ts-expect-error Only a pending receipt guarantees a Handoff Turn.
+      const anyHandoff: string = switched.handoffTurnId;
+      // @ts-expect-error An unchanged switch runs no Handoff Turn.
+      const noHandoff: string = switched.status === "unchanged" ? switched.handoffTurnId : "";
+      void switchStatus; void pendingHandoff; void anyHandoff; void noHandoff;
+      // @ts-expect-error A Template switch requires a recoverable identity.
+      session.switchTemplate({templateId:"template_2"});
+      // @ts-expect-error The SDK names the target templateId, not the wire field.
+      session.switchTemplate({agentTemplateId:"template_2",idempotencyKey:"switch-1"});
+      void page;
       return session.delete();
     }
     async function realtimeWorkflow(session: Session): Promise<RealtimeConnection> {
-      const user = new UserClient({ baseUrl, apiKey: userApiKey });
+      const user = owner;
       const catalog: RealtimeModelCatalog = await user.listRealtimeModels();
       const current: RealtimeModelSelection = await session.getRealtimeModelSelection();
       const selected: RealtimeModelSelection = await session.setRealtimeModel(catalog.models[0]!.id, { ifMatch: current.etag });
@@ -296,10 +369,10 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
     organization.serviceUser("user_1");
     // @ts-expect-error Native End User creation replaces the retired Service User operation.
     organization.createServiceUser({ displayName: "Customer" });
-    // @ts-expect-error Project selection was removed from User authority.
-    new UserClient({ baseUrl, apiKey: "ti_user_key_${"x".repeat(43)}", projectId: "removed" });
+    // @ts-expect-error The owner is selected with organization.user(), not a client option.
+    new OrganizationClient({ baseUrl, apiKey: organizationApiKey, userId: "user_1" });
     // @ts-expect-error Runtime selection is not an Agent configuration capability.
-    const removedRuntime: CreateSessionOptions = { idempotencyKey:"a", runtime: { backend: "codex", authId: "removed" } };
+    const removedRuntime: CreateSessionOptions = { templateId:"template_1", idempotencyKey:"a", runtime: { backend: "codex", authId: "removed" } };
     declare const session: Session;
     session.setModel("deployment.model");
     // @ts-expect-error Structured Turn output is not supported.
@@ -335,6 +408,8 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
     const apiError: TiDBLinkError = new TiDBLinkApiError({ status: 400, code: "test", message: "safe" });
     void apiError;
     void WorkspaceClient;
+    void UserClient;
+    void Agent;
     void removedRuntime;
     void provisionEndUser;
     void lifecycleWorkflow;
@@ -378,13 +453,17 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
   );
   assert.equal(installedPackage.dependencies, undefined);
   assert.equal(installedPackage.tidbLinkApiVersion, "0.0.1");
+  const sourcePackage = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  );
+  assert.match(installedPackage.tidbLinkRevision, /^[0-9a-f]{40}$/);
   assert.equal(
     installedPackage.tidbLinkRevision,
-    "882287809f91d9a3fdf60537460431d9f0fc23e7",
+    sourcePackage.tidbLinkRevision,
   );
   assert.equal(
     installedPackage.tidbLinkOpenApiSha256,
-    "906515e4c8d38c5ac9fce6390d9d646220b2d06100fbcb64e180419899989a5b",
+    sourcePackage.tidbLinkOpenApiSha256,
   );
   for (const prefix of ["Provisioning", "Realtime", "Lifecycle", "Text"]) {
     assert.equal("tidbLink" + prefix + "Revision" in installedPackage, false);
@@ -425,54 +504,51 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
     import * as sdk from "@tidblink/server";
     assert.equal(sdk.TIDB_LINK_API_VERSION, "0.0.1");
     assert.equal(sdk.TIDB_LINK_REVISION, ${JSON.stringify(installedPackage.tidbLinkRevision)});
-    const { provisionUser } = await import("@tidblink/server/examples/provision-user.mjs");
     const { prepareRealtimeConnection } = await import("@tidblink/server/examples/prepare-realtime-connection.mjs");
-    const { readOwnUsage, readUserUsage } = await import("@tidblink/server/examples/read-usage.mjs");
-    assert.equal(typeof readOwnUsage,"function");
+    const { readUserUsage } = await import("@tidblink/server/examples/read-usage.mjs");
     assert.equal(typeof readUserUsage,"function");
     const { sendMessageWorkflow } = await import("@tidblink/server/examples/send-message.mjs");
     assert.equal(typeof sendMessageWorkflow,"function");
     const { uploadFileWorkflow } = await import("@tidblink/server/examples/upload-file.mjs");
     assert.equal(typeof uploadFileWorkflow,"function");
-    const { scheduleTaskWorkflow } = await import("@tidblink/server/examples/schedule-task.mjs");
-    assert.equal(typeof scheduleTaskWorkflow,"function");
     const { submitAudioWorkflow } = await import("@tidblink/server/examples/submit-audio.mjs");
     assert.equal(typeof submitAudioWorkflow,"function");
-    const { observeMessageWorkflow } = await import("@tidblink/server/examples/observe-message.mjs");
-    assert.equal(typeof observeMessageWorkflow,"function");
-    const { answerClientToolWorkflow } = await import("@tidblink/server/examples/answer-client-tool.mjs");
-    assert.equal(typeof answerClientToolWorkflow,"function");
+    const { createLampBackend, memoryStore } = await import("@tidblink/server/examples/lamp-backend.mjs");
+    assert.equal(typeof createLampBackend, "function");
+    assert.equal(typeof memoryStore, "function");
     const { createSessionWorkflow } = await import("@tidblink/server/examples/create-session.mjs");
     assert.equal(typeof createSessionWorkflow, "function");
-    assert.equal(typeof provisionUser, "function");
     assert.equal(typeof prepareRealtimeConnection, "function");
     assert.equal(sdk.ServiceUser, undefined);
+    assert.equal(sdk.UserClient, undefined);
+    assert.equal(sdk.Agent, undefined);
+    for (const name of ["parseSessionEvent", "StreamIdleError", "ObservationStoppedError"])
+      assert.equal(sdk[name], undefined, name);
     for (const name of ["AGENT_SERVICE_API_VERSION", "AGENT_SERVICE_REVISION", "AgentStackError", "AgentStackApiError", "TIDB_LINK_PROVISIONING_REVISION", "TIDB_LINK_REALTIME_REVISION", "TIDB_LINK_LIFECYCLE_REVISION", "TIDB_LINK_TEXT_REVISION"]) {
       assert.equal(sdk[name], undefined);
     }
     const orgKey = "ti_org_key_" + "x".repeat(43);
     const userKey = "ti_user_key_" + "y".repeat(43);
-    const rotatedKey = "ti_user_key_" + "z".repeat(43);
     const requests = [];
     const server = createServer((request, response) => {
       requests.push({ method: request.method, url: request.url, key: request.headers.authorization });
       response.setHeader("content-type", "application/json");
-      if (request.url === "/api/v1/user/agents") {
-        response.end(JSON.stringify({ agents: [] }));
-      } else if (request.url === "/api/v1/realtime-models") {
+      if (request.url === "/api/v1/org/users/user_1/sessions") {
+        response.end(JSON.stringify({ sessions: [], hasMore: false, nextCursor: null }));
+      } else if (request.url === "/api/v1/org/users/user_1/realtime-models") {
         response.end(JSON.stringify({
           defaultModel: "voice-a",
           models: [{ id: "voice-a", label: "Voice A", available: true, isDefault: true, languages: ["en-US"], endpointingModes: ["client"], audio: { input: [], output: [] } }],
         }));
-      } else if (request.url === "/api/v1/user/sessions/session_1") {
+      } else if (request.url === "/api/v1/org/users/user_1/sessions/session_1") {
         response.end(JSON.stringify({ session: {
           realtimeModel: "voice-a", realtimeModelRevision: 1,
           realtimeModelEtag: "realtime-v1", realtimeVoice: { language: "en-US" },
         } }));
-      } else if (request.url === "/api/v1/user/sessions/session_1/realtime") {
+      } else if (request.url === "/api/v1/org/users/user_1/sessions/session_1/realtime") {
         response.writeHead(201).end(JSON.stringify({
           realtimeConnection: {
-            object: "realtime_connection", id: "rtc_1", sessionId: "session_1", agentId: "agent_1",
+            object: "realtime_connection", id: "rtc_1", sessionId: "session_1",
             provider: { name: "mock", region: "test", model: "voice-a" }, status: "connecting",
             audio: { input: { encoding: "pcm16", sampleRate: 16000, channels: 1 }, output: { encoding: "pcm16", sampleRate: 24000, channels: 1 } },
             activeTaskTurnId: null, usage: { inputAudioSec: 0, outputAudioSec: 0, thoughtTokens: 0, textTokens: 0 },
@@ -483,53 +559,40 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
           connectTokenExpiresAt: "2026-10-27T00:01:00.000Z",
         }));
       } else {
-        const token = request.url.endsWith("/rotate") ? rotatedKey : userKey;
-        response.writeHead(201).end(JSON.stringify({ apiKey: {
-          apiKeyId: "uak_key", userId: "user_1", organizationId: "org_1",
-          status: "active", revokedAt: null, tokenPrefix: "ti_user_key_",
-        }, token }));
+        response.writeHead(404).end(JSON.stringify({ error: { code: "not_found", message: "Not found" } }));
       }
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     try {
       const baseUrl = "http://127.0.0.1:" + server.address().port;
       const org = new sdk.OrganizationClient({ baseUrl, apiKey: orgKey });
-      const { token } = await org.createUserApiKey("user_1", { name: "test" });
-      assert.equal(token, userKey);
-      const user = new sdk.UserClient({ baseUrl, apiKey: token });
-      assert.deepEqual(await user.listAgents(), []);
-      const rotated = await org.rotateUserApiKey("uak_key");
-      assert.equal(rotated.token, rotatedKey);
-      assert.deepEqual(await new sdk.UserClient({ baseUrl, apiKey: rotated.token }).listAgents(), []);
+      const user = org.user("user_1");
+      assert.deepEqual(await user.listSessions(), { sessions: [], hasMore: false, nextCursor: null });
       const prepared = await prepareRealtimeConnection({
         baseUrl,
-        userApiKey: rotated.token,
+        organizationApiKey: orgKey,
+        userId: "user_1",
         sessionId: "session_1",
       });
       assert.equal(prepared.realtimeConnection.id, "rtc_1");
       assert.match(prepared.connectToken, /^rct_/);
-      assert.equal(JSON.stringify(new sdk.UserClient({ baseUrl, apiKey: rotated.token })).includes(prepared.connectToken), false);
+      assert.equal(JSON.stringify(user).includes(prepared.connectToken), false);
       assert.deepEqual(requests, [
-        {method:"POST",url:"/api/v1/org/users/user_1/api-keys",key:"Bearer " + orgKey},
-        {method:"GET",url:"/api/v1/user/agents",key:"Bearer " + userKey},
-        {method:"POST",url:"/api/v1/org/user-api-keys/uak_key/rotate",key:"Bearer " + orgKey},
-        {method:"GET",url:"/api/v1/user/agents",key:"Bearer " + rotatedKey},
-        {method:"GET",url:"/api/v1/realtime-models",key:"Bearer " + rotatedKey},
-        {method:"GET",url:"/api/v1/user/sessions/session_1",key:"Bearer " + rotatedKey},
-        {method:"POST",url:"/api/v1/user/sessions/session_1/realtime",key:"Bearer " + rotatedKey},
+        {method:"GET",url:"/api/v1/org/users/user_1/sessions",key:"Bearer " + orgKey},
+        {method:"GET",url:"/api/v1/org/users/user_1/realtime-models",key:"Bearer " + orgKey},
+        {method:"GET",url:"/api/v1/org/users/user_1/sessions/session_1",key:"Bearer " + orgKey},
+        {method:"POST",url:"/api/v1/org/users/user_1/sessions/session_1/realtime",key:"Bearer " + orgKey},
       ]);
-      for (const [Client, apiKey] of [[sdk.UserClient, orgKey], [sdk.OrganizationClient, "ag9_oak." + "key." + "x".repeat(32)]]) {
-        assert.throws(() => new Client({baseUrl,apiKey}), (error) => {
+      for (const apiKey of [userKey, "ag9_oak." + "key." + "x".repeat(32)]) {
+        assert.throws(() => new sdk.OrganizationClient({baseUrl,apiKey}), (error) => {
           assert(error instanceof TypeError);
           assert(!String(error).includes(apiKey));
           assert(!JSON.stringify(error).includes(apiKey));
           return true;
         });
       }
-      assert.equal(requests.length, 7);
-      for (const client of [org, user]) {
-        for (const key of [orgKey, userKey, rotatedKey]) assert(!JSON.stringify(client).includes(key));
-      }
+      assert.equal(requests.length, 4);
+      for (const client of [org, user]) assert(!JSON.stringify(client).includes(orgKey));
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

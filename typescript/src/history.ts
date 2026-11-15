@@ -183,6 +183,8 @@ export interface OperationRecord {
   compensatesOperationId?: string | null;
   source?:
     | { type: "session_client" }
+    | { type: "hardware"; hardwareBindingId: string; method: string }
+    /** Historical Hardware calls name the requirement instead of the binding. */
     | { type: "hardware"; hardwareRequirementId: string; method: string };
   label?: string;
   category?: "tool_call" | "skill_read";
@@ -219,6 +221,8 @@ interface TurnRecordBase {
   sessionId: string;
   status: TurnStatus;
   billingTag: BillingTag | null;
+  /** The Template frozen when the Turn was admitted; null when none was recorded. */
+  agentTemplateId: string | null;
   userMessages?: MessageRecord[];
   userFiles?: TurnUserFile[];
   operations: OperationRecord[];
@@ -232,17 +236,37 @@ interface TurnRecordBase {
 }
 
 export interface FullAgentTurnRecord extends TurnRecordBase {
+  kind?: never;
   executor?: "full_agent";
   userMessage: MessageRecord;
 }
 
 export interface RealtimeTurnRecord extends TurnRecordBase {
+  kind?: never;
   executor: "realtime_model";
   userMessage: MessageRecord;
   realtime: { connectionId: string; linkedTurnIds: string[] };
 }
 
-export type TurnRecord = FullAgentTurnRecord | RealtimeTurnRecord;
+/**
+ * The Turn a Template switch runs under the target Template to summarize the
+ * Session so far. It has no user Message; when it succeeds, its assistant
+ * Message is the summary.
+ */
+export interface TemplateHandoffTurnRecord
+  extends Omit<TurnRecordBase, "agentTemplateId" | "userMessages"> {
+  kind: "template_handoff";
+  executor?: "full_agent";
+  /** The target Template of the switch. */
+  agentTemplateId: string;
+  /** Always empty. */
+  userMessages: MessageRecord[];
+}
+
+export type TurnRecord =
+  | FullAgentTurnRecord
+  | RealtimeTurnRecord
+  | TemplateHandoffTurnRecord;
 
 export interface TurnPage {
   turns: TurnRecord[];
@@ -291,9 +315,22 @@ export type SessionRealtimeEvent = {
     }
 );
 
+/** A completed switch of the Session to another Template. */
+export interface SessionTemplateSwitch {
+  id: string;
+  commandId: string;
+  status: "succeeded";
+  /** The Session Configuration Epoch the switch started. */
+  configurationEpoch: number;
+  agentTemplateId: string;
+  contentDigest: string;
+  createdAt: string;
+}
+
 export type SessionTimelineEntry =
   | { type: "turn"; turn: TurnRecord }
-  | { type: "realtime"; realtime: SessionRealtimeEvent };
+  | { type: "realtime"; realtime: SessionRealtimeEvent }
+  | { type: "template_switch"; templateSwitch: SessionTemplateSwitch };
 
 export interface SessionTimelinePage {
   entries: SessionTimelineEntry[];
@@ -302,7 +339,7 @@ export interface SessionTimelinePage {
 }
 
 const sessionPath = (sessionId: string): string =>
-  `/api/v1/user/sessions/${encodeURIComponent(sessionId)}`;
+  `/sessions/${encodeURIComponent(sessionId)}`;
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

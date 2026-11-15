@@ -14,15 +14,30 @@ import {
 import { parseApiKeyTokenId } from "../src/auth/api-key-token";
 
 const exec = promisify(execFile);
+import { createServer as createNetServer, type AddressInfo } from "node:net";
 
 it("an independent installed SDK consumer uses Organization authority against the compiled backend", async () => {
+  // The consumer serves the example HTTP Connector on this loopback port; the
+  // harness routes the fictional HTTPS endpoint to it.
+  const connectorPort = await new Promise<number>((resolve, reject) => {
+    const probe = createNetServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolve(port));
+    });
+  });
+  const connectorEndpoint = "https://sdk-connector.example.test/mcp";
   const harness = await startSystemHarness({
     databaseAdminUrl: process.env.TEST_TIDB_DATABASE_URL!,
     tidbSsl: process.env.TIDB_SSL ?? "off",
     controlledDrive9: true,
     controlledAudioTranscription: true,
     controlledVoiceProvider: true,
-    schedulerRunner: true,
+    controlledMcpEndpoint: {
+      endpointUrl: connectorEndpoint,
+      loopbackUrl: `http://127.0.0.1:${connectorPort}/mcp`,
+    },
   });
   const temporary = await mkdtemp(
     path.join(tmpdir(), "tidb-link-org-consumer-"),
@@ -120,6 +135,8 @@ it("an independent installed SDK consumer uses Organization authority against th
         SDK_ORGANIZATION_KEY: token,
         SDK_OTHER_ORGANIZATION_KEY: other,
         SDK_TEMPLATE_ID: template.templateId,
+        SDK_CONNECTOR_ENDPOINT: connectorEndpoint,
+        SDK_CONNECTOR_PORT: String(connectorPort),
       },
     });
     let output = "";
@@ -131,6 +148,7 @@ it("an independent installed SDK consumer uses Organization authority against th
     });
     let paused: ReturnType<typeof harness.model.enqueueText> | undefined;
     let title: ReturnType<typeof harness.model.enqueueText> | undefined;
+    let connectorTitle: ReturnType<typeof harness.model.enqueueText> | undefined;
     const consumer = child;
     child.on("message", (message: { stage: string; userId?: string }) => {
       void (async () => {
@@ -140,16 +158,6 @@ it("an independent installed SDK consumer uses Organization authority against th
             organizationId,
             userId: message.userId!,
           });
-          await harness.withIsolatedDatabaseFixture((client) =>
-            client.llm_spend_limit_settings.updateMany({
-              where: {
-                organization_id: organizationId,
-                scope_kind: "member",
-                scope_id: message.userId!,
-              },
-              data: { active_base_micros: 100_000_000n },
-            }),
-          );
         } else if (message.stage === "text") {
           harness.model.enqueueText({
             chunks: ["Organization SDK answer."],
@@ -173,10 +181,40 @@ it("an independent installed SDK consumer uses Organization authority against th
             chunks: ["Order shipped."],
             expectRequest: { bodyIncludes: ["SDK_ORDER_SHIPPED"] },
           });
+        } else if (message.stage === "connector") {
+          // Templates reference Connectors through Console-only tool settings.
+          value = (
+            await harness.publishAgentTemplateFixture({
+              name: "SDK Connector journey",
+              content: {
+                realtime: { language: "en-US" },
+                tools: { mcp: [{ serverId: message.userId! }] },
+              },
+            })
+          ).templateId;
+          harness.model.enqueueToolCalls({
+            toolCalls: [
+              {
+                id: "sdk_connector_call",
+                name: "mcp_sdk_orders__lookup_order",
+                arguments: { orderId: "order_7" },
+              },
+            ],
+          });
+          harness.model.enqueueText({
+            chunks: ["Connector order shipped."],
+            expectRequest: { bodyIncludes: ["SDK_CONNECTOR_RESULT"] },
+          });
+          // The new Session's first Turn also requests a background title.
+          connectorTitle = harness.model.enqueueText({
+            chunks: ["SDK Connector journey"],
+            expectRequest: {
+              bodyIncludes: ["Generate exactly one concise session title."],
+            },
+          });
         } else if (message.stage === "audio") {
+          await connectorTitle?.waitUntilRequested();
           harness.model.enqueueText({ chunks: ["SDK audio answer."] });
-        } else if (message.stage === "schedule") {
-          harness.model.enqueueText({ chunks: ["SDK scheduled answer."] });
         } else if (message.stage === "pause") {
           paused = harness.model.enqueueText({
             chunks: ["Accepted work survived rotation."],
@@ -196,11 +234,6 @@ it("an independent installed SDK consumer uses Organization authority against th
             organizationId,
             parseApiKeyTokenId("organization", token)!,
           );
-        } else if (message.stage === "compatibility") {
-          value = await harness.issueEndUserCredential({
-            organizationId,
-            userId: message.userId!,
-          });
         } else throw new Error(`Unknown fixture stage: ${message.stage}`);
         consumer.send({ value });
       })().catch((error) =>

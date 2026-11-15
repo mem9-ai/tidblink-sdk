@@ -1,3 +1,4 @@
+import type { BackendConnectionPool } from "./backend-pool.js";
 import {
   TiDBLinkApiError,
   TiDBLinkError,
@@ -47,15 +48,45 @@ export const paginationQuery = (options?: ListOptions): string => {
   return query.size ? `?${query}` : "";
 };
 
-export function requireCreationKey(value: unknown): asserts value is string {
+/** Check a stable command key; `label` names the operation in the error. */
+export function requireCreationKey(
+  value: unknown,
+  label = "Creation",
+): asserts value is string {
   if (
     typeof value !== "string" ||
     !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)
   )
     throw new TypeError(
-      "Creation requires a stable idempotencyKey (1-128 safe characters)",
+      `${label} requires a stable idempotencyKey (1-128 safe characters)`,
     );
 }
+
+/** Check a Template ID the SDK sends: 1-64 characters without surrounding whitespace. */
+export function requireTemplateId(
+  value: unknown,
+  label: string,
+): asserts value is string {
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value.length > 64 ||
+    value.trim() !== value
+  )
+    throw new TypeError(
+      `${label} requires a Template ID of 1-64 characters without surrounding whitespace`,
+    );
+}
+
+/** Add an optional `templateId` filter under its wire name, `agentTemplateId`. */
+export const setTemplateFilter = (
+  query: URLSearchParams,
+  templateId: unknown,
+): void => {
+  if (templateId === undefined) return;
+  requireTemplateId(templateId, "The templateId filter");
+  query.set("agentTemplateId", templateId);
+};
 
 export interface HttpResult<T> {
   data: T;
@@ -150,7 +181,7 @@ const errorInput = async (
   };
 };
 
-const normalizeBaseUrl = (value: string): string => {
+export const normalizeBaseUrl = (value: string): string => {
   const url = new URL(value);
   if (
     (url.protocol !== "http:" && url.protocol !== "https:") ||
@@ -184,29 +215,54 @@ export const requestOptions = (
 };
 
 /** Check the frozen wire grammar without retaining or exposing the credential. */
-export const isApiKey = (
-  value: unknown,
-  kind: "org" | "user",
-): value is string => {
-  if (typeof value !== "string") return false;
-  const match = /^ti_(org|user)_[A-Za-z0-9]{1,64}_[A-Za-z0-9_-]{43}$/u.exec(
-    value,
-  );
-  return match !== null && match[0] === value && match[1] === kind;
-};
+export const isOrganizationApiKey = (value: unknown): value is string =>
+  typeof value === "string" &&
+  /^ti_org_[A-Za-z0-9]{1,64}_[A-Za-z0-9_-]{43}$/u.test(value);
+
+/**
+ * Sends requests under one path scope with the Organization API Key. The root
+ * scope is the Organization API; `forUser` narrows it to one End User's
+ * resources. Request paths are relative to the scope.
+ */
+export type FetchFunction = (
+  input: string | URL,
+  init?: RequestInit,
+) => Promise<Response>;
 
 export class HttpClient {
   readonly #apiKey: string;
   readonly #baseUrl: string;
-  readonly #ownerPrefix: string | undefined;
+  readonly #scope: string;
+  readonly #fetch: FetchFunction;
+  /** The OrganizationClient's Backend Connections, shared by every scope. */
+  readonly backend: BackendConnectionPool | undefined;
+  /** The End User this scope selects, if any. */
+  readonly userId: string | undefined;
 
-  constructor(input: { baseUrl: string; apiKey: string; userId?: string }) {
+  constructor(input: {
+    baseUrl: string;
+    apiKey: string;
+    scope?: string;
+    fetch?: FetchFunction | undefined;
+    backend?: BackendConnectionPool | undefined;
+    userId?: string | undefined;
+  }) {
+    if (input.fetch !== undefined && typeof input.fetch !== "function")
+      throw new TypeError("fetch must be a function");
     this.#baseUrl = normalizeBaseUrl(input.baseUrl);
     this.#apiKey = input.apiKey;
-    this.#ownerPrefix =
-      input.userId === undefined
-        ? undefined
-        : `/api/v1/org/users/${encodeURIComponent(input.userId)}`;
+    this.#scope = input.scope ?? "/api/v1/org";
+    this.#fetch = input.fetch ?? ((url, init) => fetch(url, init));
+    this.backend = input.backend;
+    this.userId = input.userId;
+  }
+
+  /**
+   * The transport every request uses, including event streams and file
+   * transfers to presigned URLs. Those transfers carry no API Key.
+   */
+  get fetch(): FetchFunction {
+    return this.#fetch;
   }
 
   forUser(userId: string): HttpClient {
@@ -217,21 +273,11 @@ export class HttpClient {
     return new HttpClient({
       baseUrl: this.#baseUrl,
       apiKey: this.#apiKey,
+      scope: `${this.#scope}/users/${encodeURIComponent(userId)}`,
+      fetch: this.#fetch,
+      backend: this.backend,
       userId,
     });
-  }
-
-  private resourcePath(path: string): string {
-    if (this.#ownerPrefix === undefined) return path;
-    if (path.startsWith("/api/v1/user/"))
-      return this.#ownerPrefix + path.slice("/api/v1/user".length);
-    if (
-      /^\/api\/v1\/(files|schedulers|agent-models|realtime-models)([/?]|$)/.test(
-        path,
-      )
-    )
-      return this.#ownerPrefix + path.slice("/api/v1".length);
-    throw new TypeError("Unsupported Organization User resource path");
   }
 
   resolveUrl(value: string): URL {
@@ -365,7 +411,7 @@ export class HttpClient {
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       let response: Response;
       try {
-        response = await fetch(`${this.#baseUrl}${this.resourcePath(path)}`, {
+        response = await this.#fetch(`${this.#baseUrl}${this.#scope}${path}`, {
           method: options.method ?? "GET",
           redirect: "error",
           headers: {

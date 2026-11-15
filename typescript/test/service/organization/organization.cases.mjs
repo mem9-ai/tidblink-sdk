@@ -1,12 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import {
-  OrganizationClient,
-  UserClient,
-  TiDBLinkApiError,
-} from "@tidblink/server";
-import { organizationSessionWorkflow } from "@tidblink/server/examples/organization-session.mjs";
+import { createServer } from "node:http";
+import { OrganizationClient, TiDBLinkApiError } from "@tidblink/server";
+import { createSessionWorkflow } from "@tidblink/server/examples/create-session.mjs";
 
 const baseUrl = process.env.SDK_SERVICE_URL;
 const organization = new OrganizationClient({
@@ -43,28 +40,22 @@ assert.equal(
   (await organization.getEndUser(user.userId)).userId,
   user.userId,
 );
-assert.deepEqual(await organization.listUserApiKeys(user.userId), []);
 const owner = organization.user(user.userId);
 const other = otherOrganization.user(user.userId);
 const creation = {
   baseUrl,
   organizationApiKey: process.env.SDK_ORGANIZATION_KEY,
   userId: user.userId,
-  agentTemplateId: process.env.SDK_TEMPLATE_ID,
-  agentCreationKey: randomUUID(),
+  templateId: process.env.SDK_TEMPLATE_ID,
   sessionCreationKey: randomUUID(),
 };
-const { agent, session } = await organizationSessionWorkflow(creation);
+const { session } = await createSessionWorkflow(creation);
 assert.equal(
-  (await organizationSessionWorkflow(creation)).session.id,
+  (await createSessionWorkflow(creation)).session.id,
   session.id,
 );
-assert.equal(agent.data.ownerUserId, user.userId);
-await agent.update({ additionalInstructions: "Be concise" });
-assert.equal(
-  (await owner.getAgent(agent.id)).data.additionalInstructions,
-  "Be concise",
-);
+assert.equal(session.data.ownerUserId, user.userId);
+assert.equal(session.data.template?.templateId, process.env.SDK_TEMPLATE_ID);
 await session.rename("SDK Organization journey");
 assert(
   (await owner.listSessions()).sessions.some(
@@ -126,12 +117,6 @@ assert(
   (await session.history()).turns.some((turn) => turn.id === result.turnId),
 );
 assert((await session.timeline()).entries.length > 0);
-for await (const event of session.events({
-  signal: AbortSignal.timeout(10000),
-})) {
-  assert.equal(typeof event.cursor, "string");
-  break;
-}
 
 await stage("tools");
 const tools = await session.getClientTools();
@@ -150,33 +135,108 @@ await session.replaceClientTools(
   ],
   { ifMatch: tools.etag },
 );
-const toolInput = await session.submitMessage({
-  clientEventId: randomUUID(),
-  text: "Look up my order",
+// The compiled backend serves Backend Connections: the tool runs on the connection.
+const events = [];
+const conn = await session.connect({
+  tools: {
+    lookup_order: {
+      description: "Get order",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      run: async () => "SDK_ORDER_SHIPPED",
+    },
+  },
+  onEvent: (event) => events.push(event.type),
 });
-const [call] = await until(
-  () => session.listPendingClientToolCalls(),
-  (calls) => calls.length > 0,
-);
-await session.submitClientToolOutput({
-  clientEventId: randomUUID(),
-  turnId: call.turnId,
-  callId: call.callId,
-  output: "SDK_ORDER_SHIPPED",
-});
-assert.equal(
-  (
-    await session.waitForResult(toolInput.inputId, {
-      timeoutMs: 20000,
-      pollIntervalMs: 25,
-    })
-  ).text,
-  "Order shipped.",
-);
+const toolReply = await conn.send("Look up my order", { timeoutMs: 20000 });
+assert.equal(toolReply.text, "Order shipped.");
+assert(events.includes("agent.session.turn.requires_action"));
+assert(events.includes("agent.session.idle"));
+await conn.close();
 await until(
   () => session.refresh(),
   (current) => current.data.activeTurnId === null,
 );
+// An Organization registers and activates an HTTP Connector, and an Agent calls it.
+const { createConnectorHandler } = await import(
+  "@tidblink/server/examples/http-connector.mjs"
+);
+const { organizationId } = await organization.getOrganization();
+let connector = await organization.connectors.register({
+  displayName: "SDK Orders",
+  endpointUrl: process.env.SDK_CONNECTOR_ENDPOINT,
+});
+assert.equal(connector.status, "inactive");
+assert.equal(connector.transport, "streamable_http");
+const connectorCalls = [];
+const connectorServer = createServer(
+  createConnectorHandler({
+    baseUrl,
+    organizationId,
+    connectorId: connector.connectorId,
+    name: "SDK Orders",
+    tools: {
+      lookup_order: {
+        description: "Look up one of the user's orders",
+        inputSchema: {
+          type: "object",
+          properties: { orderId: { type: "string" } },
+          required: ["orderId"],
+        },
+        run: async ({ orderId }, context) => {
+          connectorCalls.push({ orderId, context });
+          return `SDK_CONNECTOR_RESULT ${orderId}`;
+        },
+      },
+    },
+  }),
+);
+await new Promise((resolve) =>
+  connectorServer.listen(Number(process.env.SDK_CONNECTOR_PORT), "127.0.0.1", resolve),
+);
+try {
+  connector = await organization.connectors.activate(connector.connectorId, {
+    expectedConnectorVersion: connector.connectorVersion,
+  });
+  assert.equal(connector.status, "active");
+  assert(connector.observation);
+  assert(
+    (await organization.connectors.list()).some(
+      (item) => item.connectorId === connector.connectorId,
+    ),
+  );
+  // Another Key of the same Organization manages the same registration.
+  assert.equal(
+    (await otherOrganization.connectors.get(connector.connectorId)).status,
+    "active",
+  );
+  const connectorTemplateId = await stage("connector", connector.connectorId);
+  const connectorSession = await owner.createSession({
+    templateId: connectorTemplateId,
+    idempotencyKey: randomUUID(),
+  });
+  assert.equal(
+    (
+      await connectorSession.turn(
+        { clientEventId: randomUUID(), text: "Where is order 7?" },
+        { timeoutMs: 20000, pollIntervalMs: 25 },
+      )
+    ).text,
+    "Connector order shipped.",
+  );
+  assert.equal(connectorCalls.length, 1);
+  assert.equal(connectorCalls[0].orderId, "order_7");
+  assert.equal(connectorCalls[0].context.userId, user.userId);
+  assert.equal(connectorCalls[0].context.sessionId, connectorSession.id);
+  assert.equal(connectorCalls[0].context.organizationId, organizationId);
+  connector = await organization.connectors.deactivate(connector.connectorId, {
+    expectedConnectorVersion: connector.connectorVersion,
+  });
+  assert.equal(connector.status, "inactive");
+} finally {
+  connectorServer.closeAllConnections();
+  await new Promise((resolve) => connectorServer.close(resolve));
+}
+
 await stage("audio");
 const wav = Buffer.alloc(364);
 wav.write("RIFF", 0);
@@ -206,48 +266,6 @@ await until(
   (current) => current.data.activeTurnId === null,
 );
 
-await stage("schedule");
-let schedule = await owner.schedulers.create({
-  idempotencyKey: randomUUID(),
-  title: "SDK schedule",
-  prompt: "Scheduled work",
-  delivery: { target: "bound_session", sessionId: session.id },
-  schedule: { kind: "once", after: "1s" },
-});
-const schedulerId = schedule.scheduler.schedulerId;
-const fires = await until(
-  () => owner.schedulers.fires(schedulerId),
-  ({ fires }) => fires[0]?.executionStatus === "completed",
-);
-assert.equal(
-  (await session.getTurn(fires.fires[0].result.turnId)).assistantMessage
-    .content,
-  "SDK scheduled answer.",
-);
-schedule = await owner.schedulers.get(schedulerId);
-schedule = await owner.schedulers.update(
-  schedulerId,
-  { enabled: false },
-  { ifMatch: schedule.etag },
-);
-await owner.schedulers.delete(schedulerId, { ifMatch: schedule.etag });
-await assert.rejects(
-  owner.schedulers.get(schedulerId),
-  (error) => error.status === 404,
-);
-assert(
-  (await owner.schedulers.list({ status: "deleted" })).schedulers.some(
-    (item) => item.schedulerId === schedulerId,
-  ),
-);
-await assert.rejects(
-  owner.schedulers.fires(schedulerId),
-  (error) => error.status === 404,
-);
-assert.equal(
-  (await session.getTurn(fires.fires[0].result.turnId)).status,
-  "succeeded",
-);
 
 await until(
   () => session.refresh(),
@@ -266,7 +284,7 @@ const inFlight = await session.submitMessage({
   text: "Finish accepted work",
 });
 const freshKey = await stage("rotate");
-await assert.rejects(owner.listAgents(), unauthorized);
+await assert.rejects(owner.listSessions(), unauthorized);
 const freshOrganization = new OrganizationClient({
   baseUrl,
   apiKey: freshKey,
@@ -290,11 +308,6 @@ assert.notEqual(
   realtime.realtimeConnection.id,
 );
 await recoveredSession.endRealtimeConnection();
-assert(
-  (await fresh.schedulers.list({ status: "deleted" })).schedulers.some(
-    (item) => item.schedulerId === schedulerId,
-  ),
-);
 assert.deepEqual(
   Buffer.from(await fresh.files.download(file.fileId)),
   bytes,
@@ -304,22 +317,11 @@ await freshOrganization.getUserUsageDetails(user.userId, {
   from: new Date(now.getTime() - 3600000).toISOString(),
   to: now.toISOString(),
 });
-assert.deepEqual(
-  await freshOrganization.listUserApiKeys(user.userId),
-  [],
-  "Org journey never issues a hidden User Key",
-);
 await stage("revoke");
-await assert.rejects(fresh.listAgents(), unauthorized);
+await assert.rejects(fresh.listSessions(), unauthorized);
 assert.equal((await other.getSession(session.id)).id, session.id);
-const userKey = await stage("compatibility", user.userId);
-const legacy = new UserClient({ baseUrl, apiKey: userKey });
-assert.equal((await legacy.getSession(session.id)).id, session.id);
-assert.deepEqual(
-  Buffer.from(await legacy.files.download(file.fileId)),
-  bytes,
-);
 console.log(
-  "Packed Organization consumer passed: provisioning, discovery, creation replay, ownership, file transfer/attachment, text/SSE/history, Client Tools, audio, Scheduler fire/deletion history, Realtime HTTP, rotation/revocation recovery and User compatibility.",
+  "Packed Organization consumer passed: provisioning, discovery, creation replay, ownership, file transfer/attachment, text/history, Client Tools on a Backend Connection, an HTTP Connector call, audio, Realtime HTTP, and rotation/revocation recovery.",
 );
+await organization.close();
 process.disconnect();

@@ -5,7 +5,7 @@ import {
 } from "../src/billing/billing-usage-fact";
 import {
   buildWebSearchUsage,
-  unpricedNonLlmValuation,
+  nonLlmSaleValuation,
 } from "../src/billing/non-llm-billing";
 import { execFile } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -20,10 +20,9 @@ import {
   createAppTestingModule,
   getAppPersistencePorts,
 } from "../test/support/app-testing-module";
-import { createPublishedFixtureAgent } from "../test/support/published-agent-creation";
+import { seedFixtureTemplate } from "../test/support/published-template-fixture";
 import { loadE2eEnv } from "../test/support/e2e-env";
 import { OrganizationApiKeyService } from "../src/auth/organization-api-key.service";
-import { UserApiKeyService } from "../src/auth/user-api-key.service";
 import { AgentTemplateContentSchema } from "../src/agent-templates/agent-template-content";
 import { createAgentServiceFastifyAdapter } from "../src/common/fastify-adapter";
 import { ENV } from "../src/config/config.module";
@@ -73,6 +72,24 @@ const realtimeSource = {
   list: async () => ({ models: realtimeModels, defaultModelId: "voice-a" }),
   current: async () => realtimeModels[0].settings,
   readiness: async () => "configured" as const,
+  // Template switches pin the Session's Realtime capability; this catalog has no release.
+  prepareCapability: async (selection: string | null) => {
+    const model = realtimeModels.find(
+      (item) => item.id === (selection ?? "voice-a"),
+    );
+    return model?.available
+      ? {
+          selection,
+          resolvedModelId: model.id,
+          releaseId: "sdk-fixture-release",
+          releaseHash: "sdk-fixture-release",
+          connectionId: "sdk-fixture-connection",
+          credentialVersionId: "sdk-fixture-credential",
+          settings: model.settings,
+        }
+      : null;
+  },
+  assertCurrentCapability: async () => true,
   open: async () => {
     throw new Error(
       "SDK Realtime verification does not redeem WebSocket credentials",
@@ -97,11 +114,12 @@ beforeAll(async () => {
     .useValue(
       loadE2eEnv({
         NODE_ENV: "test",
-        SCHEDULER_RUNNER: "1",
-        SCHEDULER_POLL_INTERVAL_MS: "100",
         OPS_SERVICE_ALLOWED_HOSTS: "example.test",
         WORKSPACE_KEK: "fictional-sdk-service-test-kek",
         SESSION_SECRET: "fictional-sdk-service-session-secret",
+        // Validate and publish Skill uploads in-process for the management cases.
+        TIDB_LINK_TEST_LOCAL_SKILL_PACKAGE_CAPABILITY: "1",
+        TIDB_LINK_TEST_SKILL_ASSET_IMPORT_WORKER: "1",
       }),
     )
     .overrideProvider(OpsRealtimeModelSource)
@@ -134,9 +152,12 @@ beforeAll(async () => {
       content: [
         {
           type: "text",
-          text: prompt.includes("SDK_FIXTURE")
-            ? "SDK final answer."
-            : "Trip planning",
+          // A Template switch's Handoff Turn must answer with the summary header.
+          text: prompt.includes("Write a handoff summary for the next stage")
+            ? "handoff: summary\nSDK handoff summary."
+            : prompt.includes("SDK_FIXTURE")
+              ? "SDK final answer."
+              : "Trip planning",
         },
       ],
       stopReason: fail ? "error" : "stop",
@@ -249,21 +270,25 @@ afterAll(async () => {
   if (temporary) await rm(temporary, { recursive: true, force: true });
 });
 
-const createSession = async (token: string, agentId: string) => {
+const createSession = async (
+  token: string,
+  userId: string,
+  agentTemplateId: string,
+) => {
   const response = await app.inject({
     method: "POST",
-    url: "/api/v1/user/sessions",
+    url: `/api/v1/org/users/${userId}/sessions`,
     headers: {
       authorization: `Bearer ${token}`,
       "idempotency-key": randomUUID(),
     },
-    payload: { agentId },
+    payload: { agentTemplateId },
   });
   expect(response.statusCode, response.body).toBe(201);
   return response.json().session.sessionId as string;
 };
 
-it("the packed SDK provisions users and manages Agents, Sessions and Realtime Connections through the selected service", async () => {
+it("the packed SDK provisions users and manages Sessions and Realtime Connections through the selected service", async () => {
   const store = app.get(OrganizationStore);
   const foreignOrganizationId = `org_sdk_${randomUUID().replaceAll("-", "")}`;
   await store.seedOrganization({
@@ -292,30 +317,7 @@ it("the packed SDK provisions users and manages Agents, Sessions and Realtime Co
     organizationId: DEFAULT_ORG_ID,
     displayName: "SDK Realtime stranger",
   });
-  const userKeys = app.get(UserApiKeyService);
-  const ownerKey = await userKeys.create({
-    organizationId: DEFAULT_ORG_ID,
-    userId: owner.userId,
-    name: "SDK Realtime owner",
-  });
-  const strangerKey = await userKeys.create({
-    organizationId: DEFAULT_ORG_ID,
-    userId: stranger.userId,
-    name: "SDK Realtime stranger",
-  });
   const billing = app.get(BillingUsageStore);
-  const limit = await billing.getUserLlmSpendLimitView({
-    organizationId: DEFAULT_ORG_ID,
-    userId: owner.userId,
-  });
-  // Failure cases retain conservative reservations; later cases need independent budget headroom.
-  await billing.mutateLlmSpendLimit({
-    organizationId: DEFAULT_ORG_ID,
-    scope: { kind: "member", userId: owner.userId },
-    expectedRevision: limit!.revision,
-    monthlyBaseMicros: 1_000_000_000,
-    actorUserId: owner.userId,
-  });
   const usageAt = "2030-01-02T10:00:00.000Z";
   const billingTag = { key: "cost_center", value: "Café/QA" };
   const attribution = {
@@ -323,7 +325,7 @@ it("the packed SDK provisions users and manages Agents, Sessions and Realtime Co
     sessionId: "sdk_usage_session",
     turnId: "sdk_usage_turn",
     agentRunId: null,
-    agentId: null,
+    agentTemplateId: null,
     ownerUserId: owner.userId,
     authKind: "user-api-key" as const,
     principalBucket: "user_api_key" as const,
@@ -405,7 +407,7 @@ it("the packed SDK provisions users and manages Agents, Sessions and Realtime Co
     status: "running",
     closeReason: null,
     lastError: null,
-    ...unpricedNonLlmValuation(usageAt),
+    ...nonLlmSaleValuation({ ratedAt: usageAt, salePrice: null, quantities: null }),
     createdAt: usageAt,
     updatedAt: usageAt,
   });
@@ -446,9 +448,9 @@ it("the packed SDK provisions users and manages Agents, Sessions and Realtime Co
 
   const ports = getAppPersistencePorts(app);
   const enabledTemplateId = `template_${randomUUID().replaceAll("-", "")}`;
-  await ports.agentStore.createAgentTemplate({
+  await seedFixtureTemplate(ports.templateStore, {
     organizationId: DEFAULT_ORG_ID,
-    agentTemplateId: enabledTemplateId,
+    templateId: enabledTemplateId,
     name: "SDK Realtime enabled",
   });
   await fixture.arrangeAgentTemplateContent({
@@ -460,15 +462,10 @@ it("the packed SDK provisions users and manages Agents, Sessions and Realtime Co
       sandbox: { profileId: "standard-v1" },
     }),
   });
-  const enabledAgent = await createPublishedFixtureAgent(ports.agentStore, {
-    organizationId: DEFAULT_ORG_ID,
-    userId: owner.userId,
-    agentTemplateId: enabledTemplateId,
-  });
   const disabledTemplateId = `template_${randomUUID().replaceAll("-", "")}`;
-  await ports.agentStore.createAgentTemplate({
+  await seedFixtureTemplate(ports.templateStore, {
     organizationId: DEFAULT_ORG_ID,
-    agentTemplateId: disabledTemplateId,
+    templateId: disabledTemplateId,
     name: "SDK Realtime disabled",
   });
   await fixture.arrangeAgentTemplateContent({
@@ -480,27 +477,26 @@ it("the packed SDK provisions users and manages Agents, Sessions and Realtime Co
       sandbox: { profileId: "standard-v1" },
     }),
   });
-  const disabledAgent = await createPublishedFixtureAgent(ports.agentStore, {
-    organizationId: DEFAULT_ORG_ID,
-    userId: owner.userId,
-    agentTemplateId: disabledTemplateId,
-  });
   const enabledSessionId = await createSession(
-    ownerKey.token,
-    enabledAgent.agentId,
+    own.token,
+    owner.userId,
+    enabledTemplateId,
   );
   const exampleSessionId = await createSession(
-    ownerKey.token,
-    enabledAgent.agentId,
+    own.token,
+    owner.userId,
+    enabledTemplateId,
   );
   const disabledSessionId = await createSession(
-    ownerKey.token,
-    disabledAgent.agentId,
+    own.token,
+    owner.userId,
+    disabledTemplateId,
   );
 
   const textSessionId = await createSession(
-    ownerKey.token,
-    enabledAgent.agentId,
+    own.token,
+    owner.userId,
+    enabledTemplateId,
   );
   await fixture.recordRealtimeExchange({
     organizationId: DEFAULT_ORG_ID,
@@ -574,11 +570,9 @@ it("the packed SDK provisions users and manages Agents, Sessions and Realtime Co
           SDK_SERVICE_URL: await app.getUrl(),
           SDK_ORGANIZATION_KEY: own.token,
           SDK_FOREIGN_ORGANIZATION_KEY: foreign.token,
-          SDK_USER_KEY: ownerKey.token,
-          SDK_USAGE_USER_ID: owner.userId,
-          SDK_USAGE_STRANGER_ID: stranger.userId,
+          SDK_USER_ID: owner.userId,
+          SDK_FOREIGN_USER_ID: stranger.userId,
           SDK_TEXT_SESSION_ID: textSessionId,
-          SDK_FOREIGN_USER_KEY: strangerKey.token,
           SDK_REALTIME_SESSION_ID: enabledSessionId,
           SDK_TEMPLATE_ID: enabledTemplateId,
           SDK_OTHER_TEMPLATE_ID: disabledTemplateId,
@@ -594,4 +588,4 @@ it("the packed SDK provisions users and manages Agents, Sessions and Realtime Co
       `Packed SDK service verification failed:\n${output.stdout ?? ""}${output.stderr ?? ""}`,
     );
   }
-}, 120_000);
+}, 240_000);

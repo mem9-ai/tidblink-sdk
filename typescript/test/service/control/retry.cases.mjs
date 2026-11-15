@@ -3,23 +3,21 @@ import { randomUUID } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
 import { test } from "node:test";
 import { access, writeFile } from "node:fs/promises";
-import {
-  UserClient,
-  TiDBLinkApiError,
-  TurnInterruptedError,
-} from "@tidblink/server";
+import { OrganizationClient, TiDBLinkApiError, TurnInterruptedError } from "@tidblink/server";
 
 import { controlTurnWorkflow } from "@tidblink/server/examples/control-turn.mjs";
 
-const user = new UserClient({
+const user = new OrganizationClient({
   baseUrl: process.env.SDK_SERVICE_URL,
-  apiKey: process.env.SDK_USER_KEY,
-});
+  apiKey: process.env.SDK_ORGANIZATION_KEY,
+}).user(process.env.SDK_USER_ID);
 const wait = { timeoutMs: 15000, pollIntervalMs: 25 };
 
 test("an explicit SDK retry produces its own result without rewriting the stopped input", async () => {
-  const agent = await user.getAgent(process.env.SDK_RETRY_AGENT_ID);
-  const session = await agent.createSession({ idempotencyKey: randomUUID() });
+  const session = await user.createSession({
+    templateId: process.env.SDK_RETRY_TEMPLATE_ID,
+    idempotencyKey: randomUUID(),
+  });
   const originalInput = {
     clientEventId: randomUUID(),
     text: `SDK_RETRY_${randomUUID()}`,
@@ -71,41 +69,54 @@ test("an explicit SDK retry produces its own result without rewriting the stoppe
   const retry = await session.retry(command);
   assert.equal(retry.disposition, "retrying");
   assert.equal(retry.turnId, accepted.turnId);
-  const observation = [];
+  // Follow the Session from its first event: the original terminal event replays first.
   let sawOriginalTerminal = false;
   let sawLiveRetryDraft = false;
-  for await (const update of session.observe(retry.clientEventId, {
+  let draftSeen;
+  const draft = new Promise((resolve) => (draftSeen = resolve));
+  const conn = await session.connect({
+    observe: true,
+    cursor: "0",
+    onEvent: async (event) => {
+      if (event.turnId !== accepted.turnId) return;
+      if (
+        event.data.event === "turn_finished" &&
+        event.data.payload.status === "interrupted"
+      )
+        sawOriginalTerminal = true;
+      if (
+        event.type === "agent.session.turn.output_text.snapshot" &&
+        event.data.payload.text === "Retried task " &&
+        !sawLiveRetryDraft
+      ) {
+        assert(
+          sawOriginalTerminal,
+          "The same Turn's original terminal event must be replayed first",
+        );
+        assert.equal(
+          (await session.getInteraction(command.clientEventId)).result.status,
+          "running",
+        );
+        sawLiveRetryDraft = true;
+        await writeFile(process.env.SDK_RETRY_OBSERVED_DRAFT_FILE, "observed");
+        draftSeen();
+      }
+    },
+  });
+  await draft;
+  const result = await session.waitForResult(retry.clientEventId, {
     timeoutMs: 15000,
-  })) {
-    observation.push(update);
-    if (
-      update.type === "event" &&
-      update.event.data.event === "turn_finished" &&
-      update.event.data.payload.status === "interrupted"
-    )
-      sawOriginalTerminal = true;
-    if (update.type === "draft" && update.text === "Retried task ") {
-      assert(
-        sawOriginalTerminal,
-        "The same Turn's original terminal event must be replayed first",
-      );
-      assert.equal(
-        (await session.getInteraction(command.clientEventId)).result.status,
-        "running",
-      );
-      sawLiveRetryDraft = true;
-      await writeFile(process.env.SDK_RETRY_OBSERVED_DRAFT_FILE, "observed");
-    }
-  }
+    pollIntervalMs: 25,
+  });
+  await conn.close();
   assert(
     sawLiveRetryDraft,
     "Live retry drafts must survive historical terminal replay",
   );
-  assert.equal(observation.at(-1).type, "result");
-  const result = observation.at(-1).result;
   const exampleResult = await controlTurnWorkflow({
     baseUrl: process.env.SDK_SERVICE_URL,
-    userApiKey: process.env.SDK_USER_KEY,
+    organizationApiKey: process.env.SDK_ORGANIZATION_KEY,
+    userId: process.env.SDK_USER_ID,
     sessionId: session.id,
     ...command,
     action: "retry",

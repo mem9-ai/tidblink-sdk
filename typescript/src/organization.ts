@@ -6,11 +6,18 @@ import {
   type OrganizationUserUsageSummary,
   type OrganizationUserUsageDetails,
 } from "./usage.js";
-import { EndUserClient, type AgentRecord } from "./user.js";
+import { EndUserClient } from "./user.js";
+import { Templates } from "./templates.js";
+import { Skills } from "./skills.js";
+import { Connectors } from "./connectors.js";
 import { OutcomeUnknownError } from "./errors.js";
+import { BackendConnectionPool } from "./backend-pool.js";
+import type { WebSocketConstructor } from "./backend-connection.js";
 import {
   HttpClient,
-  isApiKey,
+  normalizeBaseUrl,
+  type FetchFunction,
+  isOrganizationApiKey,
   requireKnownKeys,
   requestOptions,
 } from "./http.js";
@@ -18,6 +25,20 @@ import {
 export interface OrganizationClientOptions {
   baseUrl: string;
   apiKey: string;
+  /**
+   * Replaces the global `fetch` for every HTTP request the client makes,
+   * including audio Turn streams and file transfers; Backend Connections use
+   * `WebSocket`. Use it for proxies, custom agents,
+   * instrumentation or tests. Defaults to `globalThis.fetch`.
+   */
+  fetch?: FetchFunction;
+  /**
+   * WebSocket constructor for Backend Connections (`session.connect()`).
+   * Defaults to the global `WebSocket` of Node.js 22, which sends the
+   * Organization API Key in the upgrade's Authorization header. A
+   * replacement must accept `new WebSocket(url, { protocols, headers })`.
+   */
+  WebSocket?: WebSocketConstructor;
 }
 
 export interface Organization {
@@ -40,6 +61,12 @@ export interface EndUser {
 
 export interface CreateEndUserInput {
   displayName?: string;
+  /**
+   * Your application's identity for this End User. Creation with an
+   * externalId is idempotent: when an End User of this Organization already
+   * has exactly this externalId, the service returns it unchanged and ignores
+   * the other fields. Without one, every call creates a new End User.
+   */
   externalId?: string;
 }
 
@@ -48,123 +75,70 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
-export interface UserApiKey {
-  apiKeyId: string;
-  organizationId: string;
-  userId: string;
-  name: string;
-  tokenPrefix: string;
-  status: "active" | "revoked";
-  createdByUserId: string | null;
-  createdByOrganizationApiKeyId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  lastUsedAt: string | null;
-  revokedAt: string | null;
-}
-
-export interface IssuedUserApiKey {
-  apiKey: UserApiKey;
-  /** Available only in the successful create or rotate response. */
-  token: string;
-}
-
-const unusableCredentialReceipt = (requestId: string): never => {
-  throw new OutcomeUnknownError(
-    "TiDB Link accepted the credential request but returned an unusable receipt",
-    { requestId },
-  );
-};
-
-const userApiKeyReceipt = (
-  value: unknown,
-  requestId: string,
-  expected: Pick<UserApiKey, "status"> &
-    Partial<Pick<UserApiKey, "userId" | "apiKeyId">>,
-): UserApiKey => {
-  const apiKey = value as UserApiKey | null | undefined;
-  if (
-    typeof apiKey !== "object" ||
-    apiKey === null ||
-    Array.isArray(apiKey) ||
-    ![apiKey.apiKeyId, apiKey.userId, apiKey.organizationId].every(
-      (id) => typeof id === "string" && id.length > 0,
-    ) ||
-    (expected.userId !== undefined && apiKey.userId !== expected.userId) ||
-    (expected.apiKeyId !== undefined && apiKey.apiKeyId !== expected.apiKeyId) ||
-    apiKey.status !== expected.status ||
-    (expected.status === "active"
-      ? apiKey.revokedAt !== null
-      : typeof apiKey.revokedAt !== "string" ||
-        !Number.isFinite(Date.parse(apiKey.revokedAt)))
-  )
-    return unusableCredentialReceipt(requestId);
-  return apiKey;
-};
-
-const issuedUserApiKey = (
-  value: unknown,
-  requestId: string,
-  expected: { userId: string } | { apiKeyId: string },
-): IssuedUserApiKey => {
-  const result = value as { apiKey?: unknown; token?: unknown } | null;
-  const apiKey = userApiKeyReceipt(result?.apiKey, requestId, {
-    ...expected,
-    status: "active",
-  });
-  if (!isApiKey(result?.token, "user"))
-    return unusableCredentialReceipt(requestId);
-  // Token bodies omit the persistent row's uak_ marker.
-  const tokenId = result.token.split("_")[2]!;
-  if (
-    apiKey.apiKeyId !== `uak_${tokenId}` ||
-    apiKey.tokenPrefix !== `ti_user_${tokenId}_`
-  )
-    return unusableCredentialReceipt(requestId);
-  return { apiKey, token: result.token };
-};
-
 /** Customer operations authorized by an Organization API Key. */
 export class OrganizationClient {
   readonly #http: HttpClient;
+  readonly #backend: BackendConnectionPool;
+  readonly #templates: Templates;
+  readonly #skills: Skills;
+  readonly #connectors: Connectors;
+
+  /** Organization Agent Templates. */
+  get templates(): Templates {
+    return this.#templates;
+  }
+
+  /** Organization Skills that Templates reference. */
+  get skills(): Skills {
+    return this.#skills;
+  }
+
+  /** Organization Connectors: MCP tool servers that Agents call. */
+  get connectors(): Connectors {
+    return this.#connectors;
+  }
 
   constructor(options: OrganizationClientOptions) {
     requireKnownKeys(
       options,
-      ["baseUrl", "apiKey"],
+      ["baseUrl", "apiKey", "fetch", "WebSocket"],
       "OrganizationClient options",
     );
-    if (!isApiKey(options.apiKey, "org")) {
+    if (!isOrganizationApiKey(options.apiKey)) {
       throw new TypeError(
         "OrganizationClient requires an Organization API Key",
       );
     }
-    this.#http = new HttpClient(options);
+    if (options.WebSocket !== undefined && typeof options.WebSocket !== "function")
+      throw new TypeError("WebSocket must be a constructor");
+    this.#backend = new BackendConnectionPool({
+      baseUrl: normalizeBaseUrl(options.baseUrl),
+      apiKey: options.apiKey,
+      WebSocket: options.WebSocket,
+    });
+    this.#http = new HttpClient({
+      baseUrl: options.baseUrl,
+      apiKey: options.apiKey,
+      fetch: options.fetch,
+      backend: this.#backend,
+    });
+    this.#templates = new Templates(this.#http);
+    this.#skills = new Skills(this.#http);
+    this.#connectors = new Connectors(this.#http);
   }
 
-  /** Select the ordinary resource owner without issuing or impersonating a User API Key. */
+  /**
+   * Close every Session connection opened through this client, with reason
+   * `closed`, and its Backend Connections. Later `connect()` calls are
+   * refused; REST calls keep working.
+   */
+  close(): Promise<void> {
+    return this.#backend.close();
+  }
+
+  /** Select the End User who owns the resources; the Organization API Key remains the caller. */
   user(userId: string): EndUserClient {
     return new EndUserClient(this.#http.forUser(userId));
-  }
-
-  async unlinkAgent(
-    userId: string,
-    agentId: string,
-    options?: RequestOptions,
-  ): Promise<AgentRecord> {
-    const result = await this.#http.deleteResponse<{ agent: AgentRecord }>(
-      `/api/v1/org/users/${encodeURIComponent(userId)}/agents/${encodeURIComponent(agentId)}`,
-      { ...requestOptions(options), outcomeUnknown: true },
-    );
-    if (
-      typeof result.data?.agent?.agentId !== "string" ||
-      !result.data.agent.agentId
-    )
-      throw new OutcomeUnknownError(
-        "Agent unlink returned no usable receipt; reconcile the association",
-        { requestId: result.requestId },
-      );
-    return result.data.agent;
   }
 
   getUserUsage(
@@ -173,7 +147,7 @@ export class OrganizationClient {
   ): Promise<OrganizationUserUsageSummary> {
     const path = userUsagePath(userId, options);
     return this.#http.get(
-      `${path}${usageQuery(options, ["from", "to", "interval", "tagKey", "tagValue"])}`,
+      `${path}${usageQuery(options, ["from", "to", "interval", "templateId", "tagKey", "tagValue"])}`,
       options,
     );
   }
@@ -184,25 +158,32 @@ export class OrganizationClient {
   ): Promise<OrganizationUserUsageDetails> {
     const path = userUsagePath(userId, options);
     return this.#http.get(
-      `${path}/details${usageQuery(options, ["from", "to", "kind", "limit", "cursor", "tagKey", "tagValue"])}`,
+      `${path}/details${usageQuery(options, ["from", "to", "kind", "limit", "cursor", "templateId", "tagKey", "tagValue"])}`,
       options,
     );
   }
 
   async getOrganization(options?: RequestOptions): Promise<Organization> {
     const response = await this.#http.get<{ organization: Organization }>(
-      "/api/v1/org",
+      "",
       requestOptions(options),
     );
     return response.organization;
   }
 
+  /**
+   * Create an End User, or return the existing one with the same externalId.
+   * Calls with an externalId are retried automatically and are safe to repeat
+   * after an uncertain outcome. An externalId that only differs by case or
+   * accents from an existing one is refused with a ConflictError.
+   */
   async createEndUser(
     input: CreateEndUserInput = {},
     options?: RequestOptions,
   ): Promise<EndUser> {
+    requireKnownKeys(input, ["displayName", "externalId"], "End User input");
     const result = await this.#http.postResponse<{ user?: EndUser }>(
-      "/api/v1/org/users",
+      "/users",
       {
         ...(input.displayName === undefined
           ? {}
@@ -211,7 +192,11 @@ export class OrganizationClient {
           ? {}
           : { externalId: input.externalId }),
       },
-      { ...requestOptions(options), outcomeUnknown: true },
+      {
+        ...requestOptions(options),
+        outcomeUnknown: true,
+        idempotent: input.externalId !== undefined,
+      },
     );
     if (
       !result.data?.user ||
@@ -219,7 +204,7 @@ export class OrganizationClient {
       !result.data.user.userId
     ) {
       throw new OutcomeUnknownError(
-        "End User creation returned no usable User; reconcile by externalId",
+        "End User creation returned no usable User; repeat it with the same externalId",
         {
           requestId: result.requestId,
         },
@@ -230,7 +215,7 @@ export class OrganizationClient {
 
   async listEndUsers(options?: RequestOptions): Promise<EndUser[]> {
     const response = await this.#http.get<{ users: EndUser[] }>(
-      "/api/v1/org/users",
+      "/users",
       requestOptions(options),
     );
     return response.users;
@@ -238,60 +223,9 @@ export class OrganizationClient {
 
   async getEndUser(userId: string, options?: RequestOptions): Promise<EndUser> {
     const response = await this.#http.get<{ user: EndUser }>(
-      `/api/v1/org/users/${encodeURIComponent(userId)}`,
+      `/users/${encodeURIComponent(userId)}`,
       requestOptions(options),
     );
     return response.user;
-  }
-
-  async createUserApiKey(
-    userId: string,
-    input: { name: string },
-    options?: RequestOptions,
-  ): Promise<IssuedUserApiKey> {
-    const result = await this.#http.postResponse<unknown>(
-      `/api/v1/org/users/${encodeURIComponent(userId)}/api-keys`,
-      { name: input.name },
-      { ...requestOptions(options), outcomeUnknown: true },
-    );
-    return issuedUserApiKey(result.data, result.requestId, { userId });
-  }
-
-  async listUserApiKeys(
-    userId: string,
-    options?: RequestOptions,
-  ): Promise<UserApiKey[]> {
-    const response = await this.#http.get<{ apiKeys: UserApiKey[] }>(
-      `/api/v1/org/users/${encodeURIComponent(userId)}/api-keys`,
-      requestOptions(options),
-    );
-    return response.apiKeys;
-  }
-
-  async rotateUserApiKey(
-    apiKeyId: string,
-    options?: RequestOptions,
-  ): Promise<IssuedUserApiKey> {
-    const result = await this.#http.postResponse<unknown>(
-      `/api/v1/org/user-api-keys/${encodeURIComponent(apiKeyId)}/rotate`,
-      undefined,
-      { ...requestOptions(options), outcomeUnknown: true },
-    );
-    return issuedUserApiKey(result.data, result.requestId, { apiKeyId });
-  }
-
-  async revokeUserApiKey(
-    apiKeyId: string,
-    options?: RequestOptions,
-  ): Promise<UserApiKey> {
-    const result = await this.#http.postResponse<{ apiKey?: unknown }>(
-      `/api/v1/org/user-api-keys/${encodeURIComponent(apiKeyId)}/revoke`,
-      undefined,
-      { ...requestOptions(options), outcomeUnknown: true },
-    );
-    return userApiKeyReceipt(result.data?.apiKey, result.requestId, {
-      apiKeyId,
-      status: "revoked",
-    });
   }
 }

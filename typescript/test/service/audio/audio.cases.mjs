@@ -3,17 +3,16 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
-import { UserClient, TiDBLinkApiError, TurnFailedError } from "@tidblink/server";
+import { OrganizationClient, TiDBLinkApiError, TurnFailedError } from "@tidblink/server";
 const baseUrl = process.env.SDK_SERVICE_URL;
-const user = new UserClient({ baseUrl, apiKey: process.env.SDK_USER_KEY });
-const stranger = new UserClient({
+const user = new OrganizationClient({
   baseUrl,
-  apiKey: process.env.SDK_FOREIGN_USER_KEY,
-});
-const budget = new UserClient({
+  apiKey: process.env.SDK_ORGANIZATION_KEY,
+}).user(process.env.SDK_USER_ID);
+const stranger = new OrganizationClient({
   baseUrl,
-  apiKey: process.env.SDK_AUDIO_BUDGET_USER_KEY,
-});
+  apiKey: process.env.SDK_ORGANIZATION_KEY,
+}).user(process.env.SDK_FOREIGN_USER_ID);
 const wav = () => {
   const bytes = Buffer.alloc(364);
   bytes.write("RIFF", 0);
@@ -31,12 +30,8 @@ const wav = () => {
   return bytes;
 };
 const newSession = async (client = user) =>
-  (
-    await client.createAgent({
-      agentTemplateId: process.env.SDK_TEMPLATE_ID,
-      idempotencyKey: randomUUID(),
-    })
-  ).createSession({
+  client.createSession({
+    templateId: process.env.SDK_TEMPLATE_ID,
     idempotencyKey: randomUUID(),
     billingTag: { key: "audio", value: "default" },
   });
@@ -45,6 +40,17 @@ const recording = (filename = "voice.wav") => ({
   contentType: "audio/wav",
   bytes: wav(),
 });
+
+/** The Session released its last Turn (agent.session.idle): the next Turn or switch may start. */
+const untilIdle = async (session) => {
+  const end = Date.now() + 15000;
+  for (;;) {
+    await session.refresh();
+    if (session.data.activeTurnId === null) return;
+    if (Date.now() > end) throw new Error("The Session did not release its Turn");
+    await delay(25);
+  }
+};
 
 test("actual audio bytes become transcribed input and a successful saved Turn with correct Billing Tag semantics", async () => {
   const session = await newSession();
@@ -59,11 +65,13 @@ test("actual audio bytes become transcribed input and a successful saved Turn wi
   assert.equal(turn.userMessage.inputContext.channel, "audio");
   assert.equal(turn.billingTag, null);
   assert.equal(turn.assistantMessage.id, result.messageId);
+  await untilIdle(session);
   const inherited = await session.audio(recording());
   assert.deepEqual((await session.getTurn(inherited.turnId)).billingTag, {
     key: "audio",
     value: "default",
   });
+  await untilIdle(session);
   const overridden = await session.audio({
     ...recording(),
     billingTag: { key: "audio", value: "override" },
@@ -79,7 +87,7 @@ test("actual audio bytes become transcribed input and a successful saved Turn wi
   );
 });
 
-test("actual audio preserves unsupported/malformed/provider and budget refusals before a Turn starts", async () => {
+test("actual audio preserves unsupported/malformed/provider refusals before a Turn starts", async () => {
   const session = await newSession();
   await assert.rejects(
     session.audio({
@@ -101,14 +109,6 @@ test("actual audio preserves unsupported/malformed/provider and budget refusals 
     (error) => error instanceof TiDBLinkApiError && error.code === "asr_failed",
   );
   assert.deepEqual((await session.history()).turns, []);
-  const limited = await newSession(budget);
-  await assert.rejects(
-    limited.audio(recording("budget.wav")),
-    (error) =>
-      error instanceof TiDBLinkApiError &&
-      error.status === 429 &&
-      error.code === "llm_spend_limit_exhausted",
-  );
   await assert.rejects(
     stranger.session(session.id).audio(recording()),
     (error) => error instanceof TiDBLinkApiError && error.status === 404,
@@ -149,7 +149,8 @@ test("the installed prerecorded-audio example returns the actual saved answer", 
   const session = await newSession();
   const result = await submitAudioWorkflow({
     baseUrl,
-    userApiKey: process.env.SDK_USER_KEY,
+    organizationApiKey: process.env.SDK_ORGANIZATION_KEY,
+    userId: process.env.SDK_USER_ID,
     sessionId: session.id,
     ...recording(),
   });

@@ -117,25 +117,52 @@ export class TurnInterruptedError extends TiDBLinkError {
   }
 }
 
-/** Observation stopped locally; the original command can still be queried or observed. */
-export class ObservationStoppedError extends OutcomeUnknownError {
-  readonly cursor: string | undefined;
-  readonly timedOut: boolean;
+/**
+ * A Backend Connection closed, or could not be opened. `code` is the
+ * WebSocket close code: 4001 means the Organization API Key is missing,
+ * invalid, revoked or rotated, or its Organization is inactive, and
+ * reconnecting cannot help (`retryable` is false). Other closes, such as a
+ * drained or restarted replica, are retryable.
+ */
+export class BackendConnectionClosedError extends ConnectionError {
+  readonly code: number;
+  readonly reason: string;
+  readonly retryable: boolean;
 
-  constructor(
-    message: string,
-    options: {
-      sessionId: string;
-      inputId: string;
-      turnId?: string;
-      cursor?: string;
-      requestId?: string;
-      timedOut?: boolean;
-      cause?: unknown;
-    },
-  ) {
-    super(message, options);
-    this.cursor = options.cursor;
-    this.timedOut = options.timedOut ?? false;
+  constructor(input: { code: number; reason?: string; message?: string; cause?: unknown }) {
+    super(
+      input.message ??
+        `Backend Connection closed with code ${input.code}${input.reason ? `: ${input.reason}` : ""}`,
+      input.cause === undefined ? undefined : { cause: input.cause },
+    );
+    this.code = input.code;
+    this.reason = input.reason ?? "";
+    this.retryable = input.code !== 4001 && input.code !== 4009;
+  }
+}
+
+/**
+ * The core answered a Backend Connection request with a JSON-RPC error.
+ * `code` is the JSON-RPC error code; for -32000 (refused), `reason` names
+ * why, for example `session_not_found` or `connection_full`. A refused
+ * `session.send` carries the REST message command's error code as `reason`,
+ * such as `session_read_only` or `turn_admission_closed`.
+ */
+export class BackendRequestError extends TiDBLinkError {
+  readonly code: number;
+  readonly reason: string | undefined;
+  /** For a refused `session.send`, the REST error's `details`. */
+  readonly details: unknown;
+
+  constructor(input: {
+    code: number;
+    message: string;
+    reason?: string;
+    details?: unknown;
+  }) {
+    super(input.message);
+    this.code = input.code;
+    this.reason = input.reason;
+    this.details = input.details;
   }
 }

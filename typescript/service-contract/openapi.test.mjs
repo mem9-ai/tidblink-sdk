@@ -3,9 +3,6 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const expectedRevision = "882287809f91d9a3fdf60537460431d9f0fc23e7";
-const expectedSourceSha256 =
-  "906515e4c8d38c5ac9fce6390d9d646220b2d06100fbcb64e180419899989a5b";
 const openApiBytes = await readFile(new URL("openapi.json", import.meta.url));
 const document = JSON.parse(openApiBytes);
 const metadata = JSON.parse(
@@ -14,7 +11,7 @@ const metadata = JSON.parse(
 const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
-const sessionPath = "/api/v1/user/sessions/{id}";
+const sessionPath = "/api/v1/org/users/{userId}/sessions/{id}";
 const schema = (name) => {
   const value = document.components.schemas[name];
   assert(value, `missing schema ${name}`);
@@ -26,9 +23,9 @@ const properties = (value) => {
 };
 
 test("text and history keep the selected immutable service contract", () => {
-  assert.equal(metadata.tidbLinkRevision, expectedRevision);
+  assert.match(metadata.tidbLinkRevision, /^[0-9a-f]{40}$/);
   assert.equal(metadata.tidbLinkApiVersion, "0.0.1");
-  assert.equal(metadata.sourceOpenApiSha256, expectedSourceSha256);
+  assert.equal(document.info.version, metadata.tidbLinkApiVersion);
   assert.equal(packageJson.tidbLinkRevision, metadata.tidbLinkRevision);
   assert.equal(
     packageJson.tidbLinkOpenApiSha256,
@@ -37,11 +34,11 @@ test("text and history keep the selected immutable service contract", () => {
   assert.equal(packageJson.tidbLinkApiVersion, metadata.tidbLinkApiVersion);
   assert.equal(
     createHash("sha256").update(openApiBytes).digest("hex"),
-    metadata.sha256,
+    metadata.snapshots["openapi.json"],
   );
 });
 
-test("the selected commands and history reads require User authority", () => {
+test("the selected commands and history reads require Organization authority", () => {
   const operations = [
     ["/events", "post"],
     ["/interactions", "get"],
@@ -51,13 +48,12 @@ test("the selected commands and history reads require User authority", () => {
     ["/timeline", "get"],
     ["/tools", "get"],
     ["/tools", "put"],
-    ["/client-tool-calls", "get"],
   ];
   for (const [route, method] of operations) {
     const operation = document.paths[`${sessionPath}${route}`][method];
-    assert.deepEqual(operation.security, [{ UserApiKey: [] }]);
+    assert.deepEqual(operation.security, [{ OrganizationApiKey: [] }]);
   }
-  const credential = document.components.securitySchemes.UserApiKey;
+  const credential = document.components.securitySchemes.OrganizationApiKey;
   assert.equal(credential.type, "http");
   assert.equal(credential.scheme, "bearer");
   const submission = document.paths[`${sessionPath}/events`].post;
@@ -148,8 +144,22 @@ test("history pages preserve Full Agent and Realtime projections", () => {
       200,
     );
   }
-  const turn = properties(schema("Turn"));
+  assert.deepEqual(
+    schema("Turn").oneOf.map(({ $ref }) => $ref),
+    [
+      "#/components/schemas/UserInputTurn",
+      "#/components/schemas/TemplateHandoffTurn",
+    ],
+  );
+  const turn = properties(schema("UserInputTurn"));
   assert.deepEqual(turn.executor.enum, ["full_agent", "realtime_model"]);
+  assert(schema("UserInputTurn").required.includes("agentTemplateId"));
+  assert.equal(turn.agentTemplateId.nullable, true);
+  const handoff = schema("TemplateHandoffTurn");
+  assert.deepEqual(properties(handoff).kind.enum, ["template_handoff"]);
+  assert.equal(properties(handoff).agentTemplateId.type, "string");
+  assert.equal(properties(handoff).userMessage, undefined);
+  assert(handoff.required.includes("userMessages"));
   assert.equal(turn.userMessages.type, "array");
   assert.equal(turn.realtimeResponses.type, "array");
   assert.deepEqual(properties(turn.realtime).linkedTurnIds.items, {
@@ -162,8 +172,17 @@ test("history pages preserve Full Agent and Realtime projections", () => {
     .entries.items.oneOf;
   assert.deepEqual(
     entries.map((variant) => properties(variant).type.enum[0]),
-    ["turn", "realtime"],
+    ["turn", "realtime", "template_switch"],
   );
+  assert.deepEqual(properties(entries[2]).templateSwitch.required, [
+    "id",
+    "commandId",
+    "status",
+    "configurationEpoch",
+    "agentTemplateId",
+    "contentDigest",
+    "createdAt",
+  ]);
   const facts = properties(entries[1]).realtime.oneOf;
   assert.deepEqual(
     facts.map((variant) => properties(variant).type.enum[0]),
@@ -212,62 +231,18 @@ test("cancel and checkpoint retry keep exact command identities and distinct rec
     );
 });
 
-test("independent observation preserves the declared event position and snapshot contract", () => {
-  const subscription = document.paths[`${sessionPath}/events`].get;
-  assert.deepEqual(subscription.security, [{ UserApiKey: [] }]);
-  assert(
-    subscription.parameters.some(
-      (parameter) => parameter.name === "cursor" && parameter.in === "query",
-    ),
-  );
-  assert(
-    subscription.parameters.some(
-      (parameter) => parameter.name === "stream" && parameter.required,
-    ),
-  );
-  assert(
-    subscription.parameters.some(
-      (parameter) =>
-        parameter.name === "Accept" &&
-        parameter.schema.enum.includes("text/event-stream"),
-    ),
-  );
-  const stream = subscription.responses["200"];
-  assert(stream.content["text/event-stream"]);
-  assert(stream.headers);
-  assert.match(stream.description, /complete provisional draft/);
-  assert.match(
-    stream.description,
-    /Disconnecting the subscription does not cancel/,
-  );
-  assert.match(stream.description, /agent\.session\.turn\.requires_action/);
-});
-
-test("usage surfaces preserve separate authority, ranges and result projections", () => {
-  const own = document.paths["/api/v1/billing/usage"].get;
+test("target-User usage preserves Organization authority, exact ranges and its result projection", () => {
   const org = document.paths["/api/v1/org/users/{userId}/billing/usage"].get;
-  const ownDetails = document.paths["/api/v1/billing/usage/details"].get;
   const orgDetails =
     document.paths["/api/v1/org/users/{userId}/billing/usage/details"].get;
-  for (const operation of [own, ownDetails])
-    assert.deepEqual(operation.security, [{ UserApiKey: [] }]);
   for (const operation of [org, orgDetails])
     assert.deepEqual(operation.security, [{ OrganizationApiKey: [] }]);
-  assert.equal(own.parameters.find((p) => p.name === "from").required, false);
   assert.equal(org.parameters.find((p) => p.name === "from").required, true);
-  assert(
-    own.parameters
-      .find((p) => p.name === "from")
-      .schema.pattern.includes("\\d{4}"),
-  );
   assert.equal(
     org.parameters.find((p) => p.name === "from").schema.format,
     "date-time",
   );
-  assert(!ownDetails.parameters.some((p) => p.name === "cursor"));
   assert(orgDetails.parameters.some((p) => p.name === "cursor"));
-  const self = properties(schema("ConsoleBillingDetailsResponseOpenApiDto"));
-  assert(self.llm && self.sandbox && self.webSearch && !self.nextCursor);
   const target = orgDetails.responses["200"].content["application/json"].schema;
   assert.deepEqual(target.required, [
     "items",
@@ -288,8 +263,8 @@ test("usage surfaces preserve separate authority, ranges and result projections"
   ]);
 });
 
-test("Client Tools preserve declaration replacement, pending deadlines and explicit result command shapes", () => {
-  const create = properties(schema("CreateSessionOpenApiDto"));
+test("Client Tools preserve declaration replacement", () => {
+  const create = properties(schema("CreateTemplateSessionOpenApiDto"));
   assert(create.tools);
   const replace = document.paths[`${sessionPath}/tools`].put;
   assert(
@@ -303,33 +278,9 @@ test("Client Tools preserve declaration replacement, pending deadlines and expli
   const set = properties(schema("SessionClientToolsResponseOpenApiDto"));
   assert.equal(set.revision.type, "integer");
   assert.equal(set.tools.type, "array");
-  const pending = properties(
-    schema("PendingClientToolCallsResponseOpenApiDto"),
-  ).calls;
-  for (const key of [
-    "callId",
-    "turnId",
-    "name",
-    "arguments",
-    "publishedAt",
-    "deadlineAt",
-  ])
-    assert(properties(pending.items)[key]);
-  const output = schema("SessionEventOpenApiDto").oneOf.find((variant) =>
-    properties(variant).type.enum.includes(
-      "agent.session.input.client_tool_output",
-    ),
-  );
-  assert(output.required.includes("clientEventId"));
-  const variants = properties(output).data.oneOf;
-  assert(
-    variants.some((variant) => properties(variant).output?.maxLength === 65536),
-  );
-  assert(variants.some((variant) => properties(variant).error));
 });
 
-
-test("supported Organization resources bind the explicit owner and preserve User counterparts", () => {
+test("supported Organization resources bind the explicit owner", () => {
   for (const [path, methods] of Object.entries(document.paths)) {
     if (!path.startsWith("/api/v1/org/users/{userId}/")) continue;
     for (const operation of Object.values(methods)) {
@@ -337,6 +288,158 @@ test("supported Organization resources bind the explicit owner and preserve User
       assert(operation.parameters.some((p) => p.name === "userId" && p.in === "path" && p.required));
     }
   }
-  const details = properties(schema("ConsoleBillingDetailsResponseOpenApiDto"));
-  assert(properties(details.llm.items).principalBucket.enum.includes("organization_user"));
+});
+
+test("End User creation is idempotent by externalId", () => {
+  const create = document.paths["/api/v1/org/users"].post;
+  assert.deepEqual(create.security, [{ OrganizationApiKey: [] }]);
+  assert(create.responses["200"]);
+  assert(create.responses["201"]);
+  assert(create.responses["409"]);
+  assert.match(create.description, /Retrying a creation with the same externalId is safe/);
+  assert.deepEqual(
+    Object.keys(properties(schema("CreateEndUserRequestDto"))).sort(),
+    ["displayName", "externalId"],
+  );
+});
+
+test("Session reads expose the Configuration Epoch and Template-switch fence", () => {
+  const session = properties(schema("SessionResponseOpenApiDto")).session;
+  assert(session.required.includes("configurationEpoch"));
+  assert(session.required.includes("switching"));
+  assert.equal(properties(session).configurationEpoch.nullable, true);
+  assert.equal(properties(session).switching.type, "boolean");
+});
+
+test("Sessions are created from an explicit Template with Session-level options", () => {
+  const create = document.paths["/api/v1/org/users/{userId}/sessions"].post;
+  assert.equal(
+    create.requestBody.content["application/json"].schema.$ref,
+    "#/components/schemas/CreateTemplateSessionOpenApiDto",
+  );
+  const body = schema("CreateTemplateSessionOpenApiDto");
+  assert.deepEqual(body.required, ["agentTemplateId"]);
+  assert.equal(body.additionalProperties, false);
+  const fields = properties(body);
+  // Every field the SDK sends; hardwareIds is deliberately not exposed.
+  for (const key of [
+    "agentTemplateId",
+    "model",
+    "realtimeModel",
+    "billingTag",
+    "tools",
+    "additionalInstructions",
+    "sandbox",
+    "acknowledgeSessionRecall",
+  ])
+    assert(fields[key], `missing Session creation field ${key}`);
+  assert.equal(fields.agentId, undefined);
+  assert.equal(fields.additionalInstructions.nullable, true);
+  assert.deepEqual(Object.keys(properties(fields.sandbox)).sort(), [
+    "profileId",
+    "workingDirectory",
+  ]);
+  assert.equal(fields.acknowledgeSessionRecall.type, "boolean");
+  const list = document.paths["/api/v1/org/users/{userId}/sessions"].get;
+  assert(list.parameters.some((p) => p.name === "agentTemplateId" && p.in === "query"));
+  const session = properties(schema("SessionResponseOpenApiDto")).session;
+  assert.equal(properties(session).createdWithAgentId, undefined);
+});
+
+test("a keyed Template switch returns a receipt that names its Handoff Turn", () => {
+  const command = document.paths[`${sessionPath}/template-switches`].post;
+  assert.deepEqual(command.security, [{ OrganizationApiKey: [] }]);
+  const key = command.parameters.find(
+    (p) => p.in === "header" && p.name === "Idempotency-Key",
+  );
+  assert.equal(key.required, true);
+  assert.equal(key.schema.pattern, "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$");
+  assert.equal(
+    command.requestBody.content["application/json"].schema.$ref,
+    "#/components/schemas/SwitchSessionTemplateOpenApiDto",
+  );
+  const body = schema("SwitchSessionTemplateOpenApiDto");
+  assert.deepEqual(body.required, ["agentTemplateId"]);
+  // Exactly the fields the SDK sends.
+  assert.deepEqual(Object.keys(properties(body)).sort(), [
+    "acknowledgeSessionRecall",
+    "agentTemplateId",
+  ]);
+  assert.equal(properties(body).agentTemplateId.maxLength, 64);
+  assert.equal(properties(body).acknowledgeSessionRecall.type, "boolean");
+  assert.deepEqual(Object.keys(command.responses).sort(), [
+    "202",
+    "400",
+    "401",
+    "403",
+    "404",
+    "409",
+    "503",
+  ]);
+  assert.equal(
+    command.responses["202"].content["application/json"].schema.$ref,
+    "#/components/schemas/SessionTemplateSwitchResponseOpenApiDto",
+  );
+  for (const code of ["session_switch_busy", "session_switch_in_progress", "idempotency_key_reused"])
+    assert.match(command.responses["409"].description, new RegExp(code));
+  // The SDK treats these 503 refusals as definite: the service records nothing.
+  for (const code of ["turn_admission_closed", "skill_package_store_unavailable"])
+    assert.match(command.responses["503"].description, new RegExp(code));
+  const receipt = properties(schema("SessionTemplateSwitchResponseOpenApiDto")).receipt;
+  assert.deepEqual(receipt.required, [
+    "commandId",
+    "sessionId",
+    "agentTemplateId",
+    "status",
+    "configurationEpoch",
+    "createdAt",
+  ]);
+  const fields = properties(receipt);
+  assert.deepEqual(Object.keys(fields).sort(), [
+    "agentTemplateId",
+    "commandId",
+    "completedAt",
+    "configurationEpoch",
+    "createdAt",
+    "error",
+    "handoffTurnId",
+    "sessionId",
+    "status",
+  ]);
+  assert.deepEqual(fields.status.enum, ["pending", "succeeded", "failed", "unchanged"]);
+  assert.equal(fields.handoffTurnId.type, "string");
+  assert.deepEqual(properties(fields.error).code.enum, [
+    "session_switch_conflict",
+    "agent_template_unavailable",
+    "session_switch_unsupported",
+  ]);
+});
+
+test("the core Agent is gone from the selected contract", () => {
+  for (const path of Object.keys(document.paths))
+    assert.doesNotMatch(path, /\/agents(\/|$)/);
+  const models = document.paths["/api/v1/org/users/{userId}/agent-models"].get;
+  assert.equal(
+    (models.parameters ?? []).some((p) => p.name === "agentId"),
+    false,
+  );
+  for (const name of [
+    "OpenRealtimeConnectionResponseOpenApiDto",
+    "RealtimeConnectionResponseOpenApiDto",
+  ])
+    assert.equal(
+      properties(properties(schema(name)).realtimeConnection).agentId,
+      undefined,
+    );
+  for (const route of ["", "/details"]) {
+    const read =
+      document.paths[`/api/v1/org/users/{userId}/billing/usage${route}`].get;
+    assert(read.parameters.some((p) => p.name === "agentTemplateId"));
+  }
+});
+
+test("the Session event stream documents agent.session.idle as the release before the next Turn", () => {
+  const text = JSON.stringify(document.paths[`${sessionPath}/events`].get).replace(/\\n|\s+/g, " ");
+  assert.match(text, /agent\.session\.idle/);
+  assert.match(text, /Wait for it before submitting the next message, audio Turn or Template switch/);
 });

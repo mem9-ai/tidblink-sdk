@@ -9,10 +9,6 @@ import {
   getClientTools,
   replaceClientTools,
   validateClientTools,
-  listPendingClientToolCalls,
-  submitClientToolOutput,
-  type PendingClientToolCall,
-  type ClientToolOutputInput,
   type ClientToolDeclaration,
   type ClientToolSet,
   type ReplaceClientToolsOptions,
@@ -22,22 +18,25 @@ import {
   type TurnCommandInput,
   type RetryReceipt,
 } from "./control.js";
-import {
-  sessionEvents,
-  observeTurn,
-  type SessionEvent,
-  type SessionEventsOptions,
-  type ObserveTurnOptions,
-  type TurnObservation,
-} from "./progress.js";
 import { OutcomeUnknownError } from "./errors.js";
+import {
+  switchTemplate,
+  type SwitchTemplateInput,
+  type TemplateSwitchReceipt,
+} from "./template-switch.js";
 import type { RequestOptions } from "./organization.js";
+import {
+  connectSession,
+  type ConnectOptions,
+  type SessionConnection,
+} from "./session-connection.js";
 import {
   requestOptions,
   HttpClient,
   requireEtag,
   requireKnownKeys,
   requireCreationKey,
+  requireTemplateId,
 } from "./http.js";
 import {
   realtimeModelSelectionFrom,
@@ -79,12 +78,28 @@ import type { ListOptions } from "./http.js";
 export type SelectableSessionModel = string;
 export type SessionModel = string;
 
+/** The Sandbox a Session runs in, chosen at creation. */
+export interface SessionSandboxSelection {
+  /** A selectable Sandbox profile; omitted or null uses the Template's profile. */
+  profileId?: string | null;
+  /** A Drive-relative working directory; defaults to `.`. Creation does not make it. */
+  workingDirectory?: string;
+}
+
 export interface CreateSessionOptions extends RequestOptions {
+  /** The active Template the Session runs. Required: there is no default Template. */
+  templateId: string;
+  /** Keep the same key and input when recovering an uncertain creation. */
   idempotencyKey: string;
   model?: string;
   realtimeModel?: string;
   billingTag?: BillingTag | null;
   tools?: ClientToolDeclaration[];
+  /** Added to the Template instructions for this Session only; at most 4096 UTF-8 bytes. */
+  additionalInstructions?: string | null;
+  sandbox?: SessionSandboxSelection;
+  /** Required as `true` when the Template enables cross-Session Recall. */
+  acknowledgeSessionRecall?: boolean;
 }
 
 export interface SuggestSessionNameInput {
@@ -122,7 +137,10 @@ export interface SessionRecord {
     audio: import("./realtime.js").RealtimeAudioFormats;
     startedAt: string;
   } | null;
-  createdWithAgentId: string;
+  /** Current Session Configuration Epoch; null for read-only or provider-owned snapshots. */
+  configurationEpoch: number | null;
+  /** True while a Template switch fences new interaction. */
+  switching: boolean;
   modelPolicyStatus: "allowed" | "organization_disallowed";
   status: "active" | "deleted";
   activeTurnId: string | null;
@@ -175,7 +193,7 @@ export class Session {
   async refresh(options?: RequestOptions): Promise<this> {
     options = requestOptions(options);
     const result = await this.#http.getResponse<{ session: SessionRecord }>(
-      `/api/v1/user/sessions/${encodeURIComponent(this.id)}`,
+      `/sessions/${encodeURIComponent(this.id)}`,
       options,
     );
     const etag = requireEtag(result);
@@ -191,7 +209,7 @@ export class Session {
     options = requestOptions(options);
     if (!this.#etag) await this.refresh(options);
     const result = await this.#http.patchResponse<{ session: SessionRecord }>(
-      `/api/v1/user/sessions/${encodeURIComponent(this.id)}/model`,
+      `/sessions/${encodeURIComponent(this.id)}/model`,
       { model },
       {
         ifMatch: this.#etag as string,
@@ -213,7 +231,7 @@ export class Session {
   async rename(name: string, options?: RequestOptions): Promise<this> {
     options = requestOptions(options);
     const result = await this.#http.postResponse<{ session: SessionRecord }>(
-      `/api/v1/user/sessions/${encodeURIComponent(this.id)}/name`,
+      `/sessions/${encodeURIComponent(this.id)}/name`,
       { name },
       { ...options, outcomeUnknown: true },
     );
@@ -232,7 +250,7 @@ export class Session {
       "Session naming input",
     );
     const result = await this.#http.postResponse<{ session: SessionRecord }>(
-      `/api/v1/user/sessions/${encodeURIComponent(this.id)}/name/suggest`,
+      `/sessions/${encodeURIComponent(this.id)}/name/suggest`,
       input,
       { ...options, outcomeUnknown: true },
     );
@@ -246,7 +264,7 @@ export class Session {
   ): Promise<this> {
     options = requestOptions(options);
     const result = await this.#http.patchResponse<{ session: SessionRecord }>(
-      `/api/v1/user/sessions/${encodeURIComponent(this.id)}/billing-tag`,
+      `/sessions/${encodeURIComponent(this.id)}/billing-tag`,
       { billingTag },
       { ...options, outcomeUnknown: true },
     );
@@ -257,7 +275,7 @@ export class Session {
   async delete(options?: RequestOptions): Promise<this> {
     options = requestOptions(options);
     const result = await this.#http.deleteResponse<{ session: SessionRecord }>(
-      `/api/v1/user/sessions/${encodeURIComponent(this.id)}`,
+      `/sessions/${encodeURIComponent(this.id)}`,
       { ...options, outcomeUnknown: true },
     );
     this.#record = sessionReceipt(result.data, result.requestId);
@@ -271,7 +289,7 @@ export class Session {
     options = requestOptions(options);
     requireKnownKeys(input, ["audio", "metadata"], "Realtime Connection input");
     const result = await this.#http.postResponse<unknown>(
-      `/api/v1/user/sessions/${encodeURIComponent(this.id)}/realtime`,
+      `/sessions/${encodeURIComponent(this.id)}/realtime`,
       input,
       {
         outcomeUnknown: true,
@@ -288,7 +306,7 @@ export class Session {
     const response = await this.#http.get<{
       realtimeConnection: RealtimeConnection;
     }>(
-      `/api/v1/user/sessions/${encodeURIComponent(this.id)}/realtime`,
+      `/sessions/${encodeURIComponent(this.id)}/realtime`,
       options,
     );
     return response.realtimeConnection;
@@ -299,7 +317,7 @@ export class Session {
   }): Promise<RealtimeConnectGrant> {
     options = requestOptions(options);
     const result = await this.#http.postResponse<unknown>(
-      `/api/v1/user/sessions/${encodeURIComponent(this.id)}/realtime/connect-tokens`,
+      `/sessions/${encodeURIComponent(this.id)}/realtime/connect-tokens`,
       undefined,
       {
         outcomeUnknown: true,
@@ -314,7 +332,7 @@ export class Session {
   }): Promise<RealtimeConnection> {
     options = requestOptions(options);
     const result = await this.#http.deleteResponse<unknown>(
-      `/api/v1/user/sessions/${encodeURIComponent(this.id)}/realtime`,
+      `/sessions/${encodeURIComponent(this.id)}/realtime`,
       {
         outcomeUnknown: true,
         ...(options?.signal ? { signal: options.signal } : {}),
@@ -329,7 +347,7 @@ export class Session {
     options = requestOptions(options);
     const response = await this.#http.get<{
       session: RealtimeSessionSelectionFields;
-    }>(`/api/v1/user/sessions/${encodeURIComponent(this.id)}`, options);
+    }>(`/sessions/${encodeURIComponent(this.id)}`, options);
     return realtimeModelSelectionFrom(response.session);
   }
 
@@ -347,7 +365,7 @@ export class Session {
     if (!options.ifMatch)
       throw new TypeError("Realtime Model selection requires ifMatch");
     const result = await this.#http.patchResponse<unknown>(
-      `/api/v1/user/sessions/${encodeURIComponent(this.id)}/realtime-model`,
+      `/sessions/${encodeURIComponent(this.id)}/realtime-model`,
       { realtimeModel: model },
       {
         ifMatch: options.ifMatch,
@@ -362,15 +380,24 @@ export class Session {
     );
   }
 
-  events(options?: SessionEventsOptions): AsyncGenerator<SessionEvent> {
-    return sessionEvents(this.#http, this.id, options);
+  /**
+   * Move this idle Session to another Template. After a lost response, repeat
+   * with the same input to recover the receipt. The receipt holds no Session,
+   * so `data` is not updated: call `refresh()` to read the new Template.
+   */
+  switchTemplate(input: SwitchTemplateInput): Promise<TemplateSwitchReceipt> {
+    return switchTemplate(this.#http, this.id, input);
   }
 
-  observe(
-    inputId: string,
-    options?: ObserveTurnOptions,
-  ): AsyncGenerator<TurnObservation> {
-    return observeTurn(this.#http, this.id, inputId, options);
+  /**
+   * Attach this Session to the process's Backend Connection: receive its
+   * events and, unless `observe` is set, declare and execute its Client
+   * Tools. Resolves once the attach took effect. One connection per Session
+   * per OrganizationClient; a connection on another process or client takes
+   * the Session over and this one ends with `superseded`.
+   */
+  connect(options?: ConnectOptions): Promise<SessionConnection> {
+    return connectSession(this.#http, this.#http.backend, this.#http.userId, this.id, options);
   }
 
   streamAudio(input: AudioTurnInput): AsyncGenerator<AudioTurnEvent> {
@@ -392,17 +419,7 @@ export class Session {
     return replaceClientTools(this.#http, this.id, tools, options);
   }
 
-  listPendingClientToolCalls(
-    options?: RequestOptions,
-  ): Promise<PendingClientToolCall[]> {
-    return listPendingClientToolCalls(this.#http, this.id, options);
-  }
 
-  submitClientToolOutput(
-    input: ClientToolOutputInput,
-  ): Promise<SessionInteraction> {
-    return submitClientToolOutput(this.#http, this.id, input);
-  }
 
   history(options?: ListOptions): Promise<TurnPage> {
     return history(this.#http, this.id, options);
@@ -485,30 +502,57 @@ const sessionReceipt = (
   return value.session;
 };
 
-export const createSessionForAgent = async (
+export const createSession = async (
   http: HttpClient,
-  agentId: string,
   options: CreateSessionOptions,
 ): Promise<Session> => {
   requireKnownKeys(
     options,
     [
+      "templateId",
       "idempotencyKey",
       "model",
       "realtimeModel",
       "billingTag",
       "tools",
+      "additionalInstructions",
+      "sandbox",
+      "acknowledgeSessionRecall",
       "signal",
       "requestId",
     ],
     "Session options",
   );
+  requireTemplateId(options.templateId, "Session creation");
   requireCreationKey(options.idempotencyKey);
   if (options.tools !== undefined) validateClientTools(options.tools);
-  const { idempotencyKey, signal, requestId, ...body } = options;
+  const instructions = options.additionalInstructions;
+  if (
+    instructions !== undefined &&
+    instructions !== null &&
+    typeof instructions !== "string"
+  )
+    throw new TypeError("additionalInstructions must be text or null");
+  if (options.sandbox !== undefined) {
+    requireKnownKeys(
+      options.sandbox,
+      ["profileId", "workingDirectory"],
+      "Session Sandbox selection",
+    );
+    const { profileId, workingDirectory } = options.sandbox;
+    if (
+      profileId !== undefined &&
+      profileId !== null &&
+      typeof profileId !== "string"
+    )
+      throw new TypeError("sandbox.profileId must be text or null");
+    if (workingDirectory !== undefined && typeof workingDirectory !== "string")
+      throw new TypeError("sandbox.workingDirectory must be text");
+  }
+  const { templateId, idempotencyKey, signal, requestId, ...body } = options;
   const result = await http.postResponse<{ session: SessionRecord }>(
-    "/api/v1/user/sessions",
-    { agentId, ...body },
+    "/sessions",
+    { agentTemplateId: templateId, ...body },
     {
       idempotencyKey,
       idempotent: true,

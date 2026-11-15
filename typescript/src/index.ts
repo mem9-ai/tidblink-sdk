@@ -2,7 +2,7 @@
 export const TIDB_LINK_API_VERSION = "0.0.1" as const;
 /** Exact service baseline for the supported refreshed SDK surface. */
 export const TIDB_LINK_REVISION =
-  "882287809f91d9a3fdf60537460431d9f0fc23e7" as const;
+  "4305ef67daebf23c416badf806217a7c11dcef37" as const;
 
 export {
   TiDBLinkApiError,
@@ -12,42 +12,109 @@ export {
   TurnWaitTimeoutError,
   InputNotAppliedError,
   OutcomeUnknownError,
-  ObservationStoppedError,
   TurnFailedError,
   TurnInterruptedError,
+  BackendConnectionClosedError,
+  BackendRequestError,
 } from "./errors.js";
 export { OrganizationClient } from "./organization.js";
+export { SessionConnection } from "./session-connection.js";
+export { ClientToolResultRefusedError } from "./client-tool-executor.js";
+export type {
+  ConnectOptions,
+  ClientToolHandler,
+  ClientToolHandlers,
+  ClientToolCallContext,
+  RealtimeTranscript,
+  RealtimeResponse,
+  SessionConnectionEnd,
+} from "./session-connection.js";
+export type { SendOptions } from "./session-send.js";
+export type {
+  BackendWebSocket,
+  WebSocketConstructor,
+} from "./backend-connection.js";
 export type {
   Organization,
   EndUser,
   CreateEndUserInput,
   RequestOptions,
-  IssuedUserApiKey,
   OrganizationClientOptions,
-  UserApiKey,
 } from "./organization.js";
-export { Agent, EndUserClient, UserClient } from "./user.js";
+export { Templates } from "./templates.js";
 export type {
-  AgentRecord,
+  Template,
+  TemplateSummary,
+  TemplateContent,
+  TemplateRealtimeLanguage,
+  TemplatePage,
+  TemplateListOptions,
+  TemplateCatalog,
+  TemplateInput,
+  CreateTemplateInput,
+  TemplateMutationOptions,
+} from "./templates.js";
+export { Skills } from "./skills.js";
+export type {
+  SkillSummary,
+  SkillVersion,
+  SkillPage,
+  SkillDetail,
+  SkillUpload,
+  SkillUploadState,
+  UploadSkillInput,
+  PublishSkillOptions,
+  WaitForSkillUploadOptions,
+} from "./skills.js";
+export { Connectors } from "./connectors.js";
+export type {
+  Connector,
+  ConnectorTransport,
+  RegisterConnectorInput,
+  UpdateConnectorInput,
+  ConnectorVersionOptions,
+} from "./connectors.js";
+export {
+  ConnectorKeySet,
+  ConnectorAuthError,
+  verifyConnectorCallback,
+  readConnectorCallContext,
+  CONNECTOR_CALLBACK_ISSUER,
+  CONNECTOR_CALLBACK_AUDIENCE,
+  CONNECTOR_CALL_CONTEXT_KEY,
+} from "./connector-callback.js";
+export type {
+  ConnectorVerificationKey,
+  ConnectorCallbackClaims,
+  ConnectorCallContext,
+  ConnectorKeySetOptions,
+  VerifyConnectorCallbackOptions,
+} from "./connector-callback.js";
+export { EndUserClient } from "./user.js";
+export type {
   AgentTemplate,
   AgentTemplatePage,
   AgentModelCatalog,
-  CreateAgentInput,
-  UpdateAgentInput,
+  SessionListOptions,
   SessionPage,
-  UserClientOptions,
 } from "./user.js";
-export type { ListOptions } from "./http.js";
+export type { ListOptions, FetchFunction } from "./http.js";
 export { Session } from "./session.js";
 export type {
   BillingTag,
   CreateSessionOptions,
+  SessionSandboxSelection,
   SuggestSessionNameInput,
   ClarificationItem,
   SelectableSessionModel,
   SessionModel,
   SessionRecord,
 } from "./session.js";
+export type {
+  SwitchTemplateInput,
+  TemplateSwitchReceipt,
+  TemplateSwitchStatus,
+} from "./template-switch.js";
 export type {
   OpenRealtimeConnectionInput,
   OpenRealtimeConnectionResult,
@@ -76,6 +143,7 @@ export type {
   TurnRecord,
   FullAgentTurnRecord,
   RealtimeTurnRecord,
+  TemplateHandoffTurnRecord,
   TurnPage,
   TurnStatus,
   TurnUserFile,
@@ -88,6 +156,7 @@ export type {
   SessionRealtimeEvent,
   RealtimeResponseKind,
   SessionTimelineEntry,
+  SessionTemplateSwitch,
   SessionTimelinePage,
 } from "./history.js";
 
@@ -107,19 +176,33 @@ export type {
   FileDownloadGrant,
   FileContent,
 } from "./files.js";
+export { asKnownSessionEvent } from "./events.js";
 export type {
   SessionEvent,
-  SessionEventsOptions,
-  ObserveTurnOptions,
-  TurnObservation,
-} from "./progress.js";
+  KnownSessionEvent,
+  TurnEventData,
+  TurnStartedEvent,
+  TurnDraftEvent,
+  TurnProgressEvent,
+  TurnItemAddedEvent,
+  OperationStepPayload,
+  TurnRequiresActionEvent,
+  ClientToolCallPayload,
+  TurnCompletedEvent,
+  TurnCancelledEvent,
+  TurnFailedEvent,
+  RealtimeTranscriptEvent,
+  RealtimeResponseEvent,
+  TemplateSwitchEvent,
+  TemplateSwitchEventData,
+  SessionIdleEvent,
+} from "./events.js";
 
 export type {
   BillingUsageFactKind,
   BillingCostBearer,
   BillingPrincipalBucket,
   BillingAttributionKind,
-  BillingAuthKind,
   BillingLlmRequestPurpose,
   LlmPricingStatus,
   LlmPricingContextTier,
@@ -130,19 +213,13 @@ export type {
   BillingValuationBreakdown,
   BillingFactCompletenessCounters,
   BillingFactCompleteness,
-  UserUsageScopeLevel,
-  UserUsagePeriod,
-  UserUsageScope,
-  UserUsageRange,
   UsageTotals,
   BillingBearerCostTotals,
   BillingAttributionCounters,
   BillingAttributionBreakdown,
   LlmUsageAggregate,
-  UserUsageAggregate,
   SandboxUsageAggregate,
   WebSearchUsageAggregate,
-  UsageDayPoint,
   BillingUsageSeriesInterval,
   BillingUsageSeriesRange,
   BillingUsageSeriesLlmBreakdown,
@@ -151,19 +228,12 @@ export type {
   BillingUsageSeriesBreakdown,
   BillingUsageSeriesBreakdownGroups,
   BillingUsageSeriesPoint,
-  UserUsageSummary,
-  UserLlmUsage,
-  UserSandboxUsage,
-  UserWebSearchUsage,
-  UserUsageDetails,
   OrganizationUserUsageSummary,
   OrganizationLlmUsage,
   OrganizationSandboxUsage,
   OrganizationWebSearchUsage,
   OrganizationUsageItem,
   OrganizationUserUsageDetails,
-  UserUsageOptions,
-  UserUsageDetailsOptions,
   OrganizationUserUsageOptions,
   OrganizationUserUsageDetailsOptions,
 } from "./usage.js";
@@ -171,25 +241,7 @@ export type {
   ClientToolDeclaration,
   ClientToolSet,
   ReplaceClientToolsOptions,
-  PendingClientToolCall,
-  ClientToolOutputInput,
 } from "./client-tools.js";
-export { UserSchedulers } from "./schedulers.js";
-export type {
-  SchedulerSchedule,
-  SchedulerDelivery,
-  CreateSchedulerInput,
-  UpdateSchedulerInput,
-  Scheduler,
-  SchedulerResponse,
-  SchedulerPage,
-  SchedulerListOptions,
-  OrganizationSchedulerListOptions,
-  SchedulerMutationOptions,
-  SchedulerFire,
-  SchedulerFirePage,
-} from "./schedulers.js";
-
 export { AudioTurnStoppedError } from "./audio.js";
 export type {
   AudioTurnInput,

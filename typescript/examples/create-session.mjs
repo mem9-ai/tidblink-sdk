@@ -1,32 +1,43 @@
 import { pathToFileURL } from "node:url";
-import { UserClient } from "@tidblink/server";
+import { OrganizationClient } from "@tidblink/server";
 
-/** Save the selected Template, optional model and both keys before calling. */
+/**
+ * Retain the owner, selected Template, optional Session options and the
+ * creation key before calling. Pass `acknowledgeSessionRecall: true` when the
+ * Template enables cross-Session Recall.
+ */
 export async function createSessionWorkflow({
   baseUrl,
-  userApiKey,
-  agentTemplateId,
-  agentCreationKey,
+  organizationApiKey,
+  userId,
+  templateId,
   sessionCreationKey,
   model,
+  additionalInstructions,
+  sandbox,
+  acknowledgeSessionRecall,
 }) {
-  if (!agentTemplateId)
+  if (!templateId)
     throw new TypeError(
-      "Select and retain an agentTemplateId before creating an Agent",
+      "Select and retain a templateId before creating a Session",
     );
-  const user = new UserClient({ baseUrl, apiKey: userApiKey });
+  const organization = new OrganizationClient({
+    baseUrl,
+    apiKey: organizationApiKey,
+  });
+  const user = organization.user(userId);
   const templates = await user.listAgentTemplates();
   const models = await user.listModels();
-  const agent = await user.createAgent({
-    agentTemplateId,
-    idempotencyKey: agentCreationKey,
-  });
   // Omission is part of the creation identity; resolving today's default would change a replay.
-  const session = await agent.createSession({
+  const optional = { model, additionalInstructions, sandbox, acknowledgeSessionRecall };
+  const session = await user.createSession({
+    templateId,
     idempotencyKey: sessionCreationKey,
-    ...(model === undefined ? {} : { model }),
+    ...Object.fromEntries(
+      Object.entries(optional).filter(([, value]) => value !== undefined),
+    ),
   });
-  return { agent, session, templates, models };
+  return { organization, user, session, templates, models };
 }
 
 if (
@@ -35,33 +46,35 @@ if (
 ) {
   const {
     AGENT_SERVICE_URL,
-    USER_API_KEY,
+    ORGANIZATION_API_KEY,
+    END_USER_ID,
     TEMPLATE_ID,
-    AGENT_CREATION_KEY,
     SESSION_CREATION_KEY,
     MODEL_ID,
+    ACKNOWLEDGE_SESSION_RECALL,
   } = process.env;
   if (
     !AGENT_SERVICE_URL ||
-    !USER_API_KEY ||
+    !ORGANIZATION_API_KEY ||
+    !END_USER_ID ||
     !TEMPLATE_ID ||
-    !AGENT_CREATION_KEY ||
     !SESSION_CREATION_KEY
   )
     throw new Error(
-      "Set AGENT_SERVICE_URL, USER_API_KEY, TEMPLATE_ID, AGENT_CREATION_KEY and SESSION_CREATION_KEY; MODEL_ID is optional",
+      "Set AGENT_SERVICE_URL, ORGANIZATION_API_KEY, END_USER_ID, TEMPLATE_ID and SESSION_CREATION_KEY; MODEL_ID and ACKNOWLEDGE_SESSION_RECALL=true are optional",
     );
   const result = await createSessionWorkflow({
     baseUrl: AGENT_SERVICE_URL,
-    userApiKey: USER_API_KEY,
-    agentCreationKey: AGENT_CREATION_KEY,
+    organizationApiKey: ORGANIZATION_API_KEY,
+    userId: END_USER_ID,
     sessionCreationKey: SESSION_CREATION_KEY,
-    agentTemplateId: TEMPLATE_ID,
+    templateId: TEMPLATE_ID,
     model: MODEL_ID,
+    acknowledgeSessionRecall:
+      ACKNOWLEDGE_SESSION_RECALL === "true" ? true : undefined,
   });
   console.log(
     JSON.stringify({
-      agentId: result.agent.id,
       sessionId: result.session.id,
       model: result.session.model,
     }),

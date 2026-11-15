@@ -6,18 +6,20 @@ stay on your backend; do not ship it to browsers or devices.
 
 ## Supported scope
 
-This package supports Organization information, End User provisioning, User API
-Key management, Template/model discovery, personal Agent and Session management,
+This package supports Organization information, End User provisioning,
+Template, Skill and Connector management, Connector callback verification,
+Template/model discovery, Session management and Template switches,
 text submission, steering, cancellation, checkpoint retry, original-result waiting,
-continuous progress, Client Tools, conversation history, file attachments, Schedulers,
+continuous progress, Client Tools, Session connections over Backend Connections,
+conversation history, file attachments,
 Realtime Model/Connection preparation, prerecorded audio and User usage reads for [service revision
-88228780](https://github.com/mem9-ai/agent-stack/commit/882287809f91d9a3fdf60537460431d9f0fc23e7).
+4305ef67](https://github.com/mem9-ai/agent-stack/commit/4305ef67daebf23c416badf806217a7c11dcef37).
 
 Text commands return durable receipts independently of execution. Waiting reads the
-original command's outcome. Template version application, Memory configuration,
-default Agents and general Agent overrides are removed. Browser, MSP, management and device APIs are
-outside this package. Existing resource workflows accept either User authority or
-Organization authority with an explicit owner.
+original command's outcome. The service has no Agent: a Session is created
+directly from an explicit Template, and there is no default Template. Browser, MSP, Console and device APIs are
+outside this package. Every resource workflow uses an Organization API Key with
+an explicitly selected End User; User API Keys are not supported.
 
 ## Quick start
 
@@ -29,29 +31,30 @@ npm install --save-exact @tidblink/server@next
 
 An application backend uses its Organization API Key (`ti_org_…`) and explicitly
 selects the ordinary End User with `organization.user(userId)`. The Key remains
-the caller; the User owns the resources. No User API Key is issued by this flow.
+the caller; the User owns the resources.
 
 ```js
 import { randomUUID } from "node:crypto";
 import { OrganizationClient } from "@tidblink/server";
-import { organizationSessionWorkflow } from "@tidblink/server/examples/organization-session.mjs";
+import { createSessionWorkflow } from "@tidblink/server/examples/create-session.mjs";
 
 const baseUrl = process.env.AGENT_SERVICE_URL;
 const organizationApiKey = process.env.ORGANIZATION_API_KEY;
 const organization = new OrganizationClient({ baseUrl, apiKey: organizationApiKey });
 const endUser = await organization.createEndUser({ externalId: "your-application-user-id" });
-// Retain this mapping. On later startup, load it instead of repeating creation.
+// Safe to repeat: the same externalId returns the same End User.
 const user = organization.user(endUser.userId);
 const page = await user.listAgentTemplates();
 const template = page.templates[0];
 if (!template) throw new Error("Select an available Template; follow nextCursor if hasMore");
 const creation = {
   baseUrl, organizationApiKey, userId: endUser.userId,
-  agentTemplateId: template.agentTemplateId,
-  agentCreationKey: randomUUID(), sessionCreationKey: randomUUID(),
+  templateId: template.agentTemplateId,
+  sessionCreationKey: randomUUID(),
 };
-// Persist the selected Template, optional model and both creation identities.
-const { session } = await organizationSessionWorkflow(creation);
+// Persist the selected Template, optional model and the creation identity.
+// Add acknowledgeSessionRecall: true when the Template enables cross-Session Recall.
+const { session } = await createSessionWorkflow(creation);
 const message = { clientEventId: randomUUID(), text: "Help me plan a trip" };
 // Retain the Session, command identity and original input before dispatch.
 const receipt = await session.submitMessage(message);
@@ -60,149 +63,239 @@ console.log(result.text);
 const recovered = await session.waitForResult(message.clientEventId);
 ```
 
-`externalId` is unique within an Organization. A repeated `createEndUser` returns
-`resource_conflict`; recover the mapping with `listEndUsers` and the original
-`externalId`. Agent/Session creation replays require the same creation keys and
+`externalId` is unique within an Organization, and creation with it is
+idempotent: a repeated `createEndUser` returns the existing End User unchanged and
+does not apply the other fields, and concurrent calls create one End User. The SDK
+retries such calls automatically. An `externalId` that equals an existing one only
+when case and accents are ignored is refused with `resource_conflict`. Without an
+`externalId`, every call creates a new End User. A Template that enables
+cross-Session Recall refuses Session creation with
+`agent_template_recall_acknowledgment_required` (HTTP 409) unless the input
+includes `acknowledgeSessionRecall: true`. Session creation replays require the same creation key and
 inputs. Reading the original message receipt or waiting again does not execute
 another Turn. An HTTP request ID is diagnostic, not a creation identity.
 
-The installed Organization example can run with `AGENT_SERVICE_URL`,
-`ORGANIZATION_API_KEY`, `END_USER_ID`, `TEMPLATE_ID`, `AGENT_CREATION_KEY` and
-`SESSION_CREATION_KEY` (`MODEL_ID` is optional):
+The installed example can run with `AGENT_SERVICE_URL`,
+`ORGANIZATION_API_KEY`, `END_USER_ID`, `TEMPLATE_ID` and
+`SESSION_CREATION_KEY` (`MODEL_ID` and `ACKNOWLEDGE_SESSION_RECALL=true` are optional):
 
 ```sh
-node node_modules/@tidblink/server/examples/organization-session.mjs
+node node_modules/@tidblink/server/examples/create-session.mjs
 ```
 
-`organization.user(userId)` returns an `EndUserClient`. Its Agent, Session, file,
-Scheduler and catalog methods are the same resource methods used by `UserClient`.
-Keep usage reads on `organization.getUserUsage(userId, options)` and
-`getUserUsageDetails`; their range and response shapes differ from User-Key reads.
-Private MCP registration, general Drive entry management, sandbox preferences,
-Scheduler Plans and native Hardware APIs are not wrapped by this SDK. Use the
+`organization.user(userId)` returns an `EndUserClient` with that User's
+Session, file and catalog methods. Selecting a User sends no request.
+Usage reads stay on `organization.getUserUsage(userId, options)` and
+`getUserUsageDetails`.
+Private MCP registration, general Drive entry management, Template switching,
+Schedulers and native Hardware APIs are not wrapped by this SDK. Use the
 pinned public HTTP contract for those existing service capabilities. Building ToD,
 a device gateway or management integration remains outside this package.
 Artifact APIs remain gated. The SDK prepares Realtime HTTP grants; applications
 own WebSocket/media transport. This change adds neither a generated full API
 client nor a media client.
 
-### User-Key compatibility and migration
-
-Existing `new UserClient({ baseUrl, apiKey: userApiKey })` callers and the existing
-User-Key examples remain supported. To migrate resource workflows, replace that
-client with `new OrganizationClient({ baseUrl, apiKey: organizationApiKey }).user(userId)`.
-Retain the same resource IDs, creation inputs and command identities; do not issue
-a User Key to use Organization authority. The SDK sends the real Organization
-Key only to owner-scoped service endpoints and never as an owner identity header.
-
-The optional `provision-user.mjs` example still creates a User API Key on each
-successful call, including for an existing User. Its CLI requires
-`AGENT_SERVICE_URL`, `ORGANIZATION_API_KEY`, `END_USER_EXTERNAL_ID` and
-`USER_CREDENTIAL_FILE`; it reserves a new private file and refuses to overwrite it.
-A lost issuance response cannot recover a plaintext key from metadata.
+### Credential rotation
 
 After Organization Key rotation or revocation, create a new `OrganizationClient`
 with fresh valid authority and select the same User. Existing handles retain their
-old credential. New old-authority requests, subscriptions, Scheduler fires,
+old credential. New old-authority requests, subscriptions,
 Realtime tokens and Organization-issued file tickets lose authority. Accepted
 Turns continue, and admitted file transfers may finish. Reconnect/obtain new
 grants with fresh authority and reconcile the original command before submitting
-new work. Updating retained Schedulers with fresh authority reauthorizes future
-fires. Another valid Key remains usable. Disabled Users cannot start new work;
+new work. Another valid Key remains usable. Disabled Users cannot start new work;
 Organization authority can still read retained history/files and perform supported
-cleanup. User-Key ticket lifetime remains the service's separate compatibility
-contract. Application policies and K3 spending policy are separate concerns.
+cleanup. Application policies and K3 spending policy are separate concerns.
 
-## Key management
+### Custom transport
 
-Use these methods when your application also needs a User-Key client. Organization
-owner-scoped resource access does not require issuing this credential.
+Pass `fetch` to route every request through your own transport, for example a
+proxy, a custom HTTP agent, instrumentation or a test double. It carries all
+requests the client makes: JSON calls, event streams, and file transfers to
+presigned storage URLs (which never receive the API Key).
 
-```ts
-import { OrganizationClient } from "@tidblink/server";
+```js
 const organization = new OrganizationClient({
-  baseUrl, apiKey: process.env.ORGANIZATION_API_KEY,
+  baseUrl,
+  apiKey: organizationApiKey,
+  fetch: (url, init) => fetch(url, { ...init, dispatcher: proxyAgent }),
 });
-const issued = await organization.createUserApiKey(endUser.userId, {
-  name: "Optional User-Key client",
-});
-const keys = await organization.listUserApiKeys(endUser.userId);
-const replacement = await organization.rotateUserApiKey(issued.apiKey.apiKeyId);
-// Save replacement.token; the previous token immediately stops authenticating.
-const revoked = await organization.revokeUserApiKey(issued.apiKey.apiKeyId);
 ```
 
-Create and rotate return `{ apiKey, token }`. List and revoke return metadata
-without the token or stored hash. Rotation preserves the key ID; revocation is
-idempotent. Only active ordinary End Users can own keys. Missing, foreign or
-disabled targets preserve the service's refusal.
+## Managing Templates and Skills
 
-The returned User API Key (`ti_user_…`) authenticates that User's public APIs.
-It grants no Organization management authority; `OrganizationClient` rejects it.
-An Organization key likewise grants no User identity.
+A Template defines what a Session runs: its identity, instructions, Sandbox,
+voice language, Skills and Connectors. `organization.templates` manages the Organization's Templates, and
+`organization.skills` uploads and publishes the Skills they reference. Both act
+on the Organization; they need no End User.
 
-## Templates, Agents and Sessions
+```js
+const catalog = await organization.templates.catalog();
+const created = await organization.templates.create({
+  displayName: "Support assistant",
+  content: {
+    identity: { agentName: "Ava" },
+    instructions: "Answer support questions briefly.",
+    sandbox: { profileId: catalog.sandboxes[0].id },
+    realtime: { language: "en-US" },
+  },
+  idempotencyKey: templateCreationKey,
+});
+// Replace and archive take the ETag you read; a stale one is a ConflictError.
+await organization.templates.replace(created.template.id, { displayName, content }, {
+  ifMatch: created.template.etag,
+  idempotencyKey: templateChangeKey,
+});
+```
 
-Use `organization.user(userId)` or a User-Key `UserClient` to discover available Templates and deployment models. Model
+`templates.catalog()` lists the models, Sandbox profiles and published Skills a
+Template may reference. `templates.list()` filters by `lifecycleStatus` and `q`
+and pages with `cursor`. Replacing a Template does not change Sessions already
+created from it; they keep the content snapshot identified by
+`session.data.template.contentDigest`. An archived Template can no longer start
+Sessions. Creation, replacement and archive are retried automatically with their
+idempotency key; after an `OutcomeUnknownError`, repeat the call with the same key
+and input.
+
+A Skill is a ZIP package with a `SKILL.md` at its root. Uploading validates it
+asynchronously; publishing makes it the Skill's next version:
+
+```js
+const upload = await organization.skills.upload({ bytes: zipBytes, idempotencyKey });
+const validated = await organization.skills.waitForUpload(upload.uploadId);
+if (validated.state !== "awaiting_confirmation")
+  throw new Error(validated.validation.failureCode ?? validated.state);
+await organization.skills.publish(upload.uploadId, { idempotencyKey: publishKey });
+const published = await organization.skills.waitForUpload(upload.uploadId, { until: ["done", "failed"] });
+// Reference it from a Template: content.skills = [{ skillId, version }]
+const reference = { skillId: published.skillId, version: published.version };
+```
+
+Each upload creates a new Skill, and an upload is visible only to the Organization
+API Key that created it. Publish before `expiresAt`, or cancel an unpublished
+upload with `cancelUpload`. `skills.list()` and `skills.get(skillId)` read
+published Skills and their versions.
+
+## Connectors
+
+A Connector is an Organization-owned MCP tool server that Sessions call. The
+platform calls it for the End User who owns the Session and names that User in
+every call, so your server can act on the right account without trusting model
+arguments.
+
+```js
+let connector = await organization.connectors.register({
+  displayName: "Orders",
+  endpointUrl: "https://orders.example.com/mcp",
+});
+// Activation connects to the endpoint and discovers its tools.
+connector = await organization.connectors.activate(connector.connectorId, {
+  expectedConnectorVersion: connector.connectorVersion,
+});
+```
+
+Edit (`update`) only an inactive Connector, and pass the `connectorVersion` you
+read to every change; a stale one is a `ConflictError`. `deactivate` stops new
+calls. Registration is not retried automatically: after an `OutcomeUnknownError`,
+list the Connectors and match the display name, which is unique. Templates refer
+to Connectors through Console tool settings; this SDK does not set them.
+
+Your Connector verifies every request the platform sends (initialization, tool
+discovery and tool calls) with `verifyConnectorCallback`, and reads who a tool
+call is for with `readConnectorCallContext`:
+
+```js
+import { ConnectorKeySet, verifyConnectorCallback, readConnectorCallContext } from "@tidblink/server";
+
+// Fetch keys only from your trusted deployment URL; they are cached.
+const keys = new ConnectorKeySet({ baseUrl });
+await verifyConnectorCallback(request.headers.authorization, {
+  keys, organizationId, connectorId,
+}); // Throws ConnectorAuthError: answer 401.
+// For tools/call:
+const { callId, userId, sessionId, deadline } = readConnectorCallContext(
+  message.params._meta, { organizationId },
+);
+```
+
+Tokens are Ed25519-signed, valid for at most 60 seconds, scoped to your
+Organization and Connector, and may be reused within that scope. Deduplicate side
+effects by `callId`; the platform never retries a call (`attempt` is always 1).
+Abandon work after `deadline`. The packaged `http-connector.mjs` example is a
+complete Connector over Streamable HTTP without an MCP library. The model sees each
+tool as `mcp_<server name>__<tool>`. This SDK does not include a client for the
+`tunnel` transport.
+
+## Templates and Sessions
+
+Use `organization.user(userId)` to discover available Templates and deployment models. Model
 IDs are strings from the deployment catalog, including newly published models.
 `effectiveDefaultModel` is the create-time default; `defaultModel` is the
 service's canonical catalog default and may differ.
 
 ```ts
-import { UserClient } from "@tidblink/server";
+import { OrganizationClient } from "@tidblink/server";
 
-const customer = new UserClient({
+const organization = new OrganizationClient({
   baseUrl: process.env.AGENT_SERVICE_URL!,
-  apiKey: process.env.USER_API_KEY!,
+  apiKey: process.env.ORGANIZATION_API_KEY!,
 });
+const customer = organization.user(process.env.END_USER_ID!);
 const page = await customer.listAgentTemplates({ limit: 20 });
 const template = page.templates[0];
 if (!template) throw new Error("Select an available Template");
 const models = await customer.listModels();
-const agent = await customer.createAgent({
-  agentTemplateId: template.agentTemplateId,
-  idempotencyKey: "customer-agent-1",
-});
-await agent.update({ additionalInstructions: "Prefer concise answers." });
-const session = await agent.createSession({
+const session = await customer.createSession({
+  templateId: template.agentTemplateId,
   idempotencyKey: "customer-conversation-1",
   model: models.effectiveDefaultModel,
   billingTag: { key: "account", value: "customer-1" },
+  additionalInstructions: "Prefer concise answers.",
+  sandbox: { workingDirectory: "projects/trip" },
 });
 await session.rename("Planning");
 await session.suggestName({ userText: "Plan a trip" }); // Generates and saves a name.
 await session.setBillingTag(null);
 ```
 
-Persist each creation key before calling. A new Agent key creates an independent
-Agent even for the same Template; the same key and Template recover the original
-Agent, including after unlinking. Reusing the key for another Template raises
-`ConflictError` with `agent_creation_conflict`. Session creation likewise requires
-a stable key and the same original input when recovering a creation. Its model,
-Realtime Model and Billing Tag selections participate in that identity. Do not
-generate a new key just because a response was lost.
+`createSession` requires `templateId`, an active Template of the Organization;
+there is no default Template. The other options belong to this Session only:
+
+- `additionalInstructions` are added to the Template instructions. The service
+  normalizes line endings to LF and trims whitespace, allows up to 4096 UTF-8
+  bytes after normalization, and rejects unsupported control characters. The
+  Template and additional instructions together are limited to 16 KiB
+  (`agent_instructions_too_large`).
+- `sandbox.profileId` selects a Sandbox profile; omit it or pass `null` to use
+  the Template's profile. `sandbox.workingDirectory` is a Drive-relative
+  directory and defaults to `.`; creating the Session does not create it.
+- `acknowledgeSessionRecall: true` is required when the Template enables
+  cross-Session Recall, which can read other Sessions of the same End User;
+  otherwise creation fails with `agent_template_recall_acknowledgment_required`.
+- `model`, `realtimeModel`, `billingTag` and Client Tool `tools` work as
+  described in their own sections.
+
+Persist the creation key before calling. The same key and the same input recover
+the original Session; reusing the key with different input raises
+`ConflictError` with `session_creation_conflict`. Every option participates in
+that identity. Do not generate a new key just because a response was lost.
 
 `listAgentTemplates({ limit?, cursor? })` returns
-`{ templates, hasMore, nextCursor }`; `listSessions({ limit?, cursor? })` returns
-`{ sessions, hasMore, nextCursor }`, with `Session` handles in `sessions`.
+`{ templates, hasMore, nextCursor }`; `listSessions({ limit?, cursor?, templateId? })`
+returns `{ sessions, hasMore, nextCursor }`, with `Session` handles in `sessions`.
+`templateId` lists only Sessions currently on that Template; keep the same
+`templateId` when following a cursor.
 Continue with the returned opaque cursor until `hasMore` is false, including
 Template pages with no available entries. A changed Template catalog can refuse
 continuation with `agent_template_list_changed`; restart discovery.
-Session cursors belong to their owning User and list. `listAgents()` returns a
-complete `Agent[]` without pagination. Use `getAgent(id)` and `getSession(id)` to
-read current owned resources; `session(id)` creates a handle without a request.
+Session cursors belong to their owning User and list. Use `getSession(id)` to
+read a current owned Session; `session(id)` creates a handle without a request.
 
-Agent create/list responses contain association metadata. `getAgent`,
-`agent.refresh()` and `agent.update()` also include `data.additionalInstructions`.
-The service normalizes line endings to LF and trims whitespace, allows up to
-4096 UTF-8 bytes after normalization, and rejects unsupported control characters.
-Null or empty text clears the setting. Updates use last committed write wins,
-without an ETag, and affect only future Sessions. Multiple Agents using the same
-Template retain independent settings and Sessions.
-
-Each Session freezes its Template recipe, digest and Agent preferences at
-creation. Later Template saves and Agent updates do not rewrite it. Session
-model selection is separate:
+Each Session freezes its Template recipe, digest and creation options.
+Later Template saves do not rewrite it; `session.data.template` names the
+Template and digest in use. Only an explicit
+[Template switch](#switching-a-sessions-template) moves it to a Template's
+current content. Session model selection is separate:
 
 ```ts
 const current = await customer.getSession(session.id);
@@ -220,38 +313,95 @@ decisions. `session.delete()` updates and returns the Session handle; `.data` co
 and lists hide the Session. Active execution or a read-only Session can refuse
 deletion. Name and Billing Tag changes do not change the frozen recipe.
 
-Organization authority can explicitly unlink an Agent belonging to a target User:
-
-```ts
-const archived = await organization.unlinkAgent(endUser.userId, agent.id);
-```
-
-The returned association is archived. Unlinking retains existing Session
-ownership, binding, configuration and history; it does not grant the Organization
-access to existing Sessions by itself. Authorized Organization owner-scoped
-clients and the User retain access to saved history under the service rules.
-
 The packaged example completes discovery and creation without message execution:
 
 ```js
 import { createSessionWorkflow } from "@tidblink/server/examples/create-session.mjs";
 
-const { agent, session } = await createSessionWorkflow({
+const { session } = await createSessionWorkflow({
   baseUrl: process.env.AGENT_SERVICE_URL,
-  userApiKey: process.env.USER_API_KEY,
-  agentCreationKey: process.env.AGENT_CREATION_KEY,
+  organizationApiKey: process.env.ORGANIZATION_API_KEY,
+  userId: process.env.END_USER_ID,
   sessionCreationKey: process.env.SESSION_CREATION_KEY,
-  agentTemplateId: process.env.TEMPLATE_ID,
+  templateId: process.env.TEMPLATE_ID,
   model: process.env.MODEL_ID,
 });
 ```
 
-For direct execution, set `AGENT_SERVICE_URL`, `USER_API_KEY`,
-`TEMPLATE_ID`, `AGENT_CREATION_KEY` and `SESSION_CREATION_KEY`; `MODEL_ID` is optional.
-Select and persist the Template ID, optional model and both keys before calling.
+For direct execution, set `AGENT_SERVICE_URL`, `ORGANIZATION_API_KEY`, `END_USER_ID`,
+`TEMPLATE_ID` and `SESSION_CREATION_KEY`; `MODEL_ID` and
+`ACKNOWLEDGE_SESSION_RECALL=true` are optional. The workflow also passes
+`additionalInstructions`, `sandbox` and `acknowledgeSessionRecall` through.
+Select and persist the Template ID, optional model and the key before calling.
 The example also returns the current Template page and model catalog. If no model
 was requested, it preserves omission so the service can recover the original
 creation even after the deployment default changes.
+
+### Switching a Session's Template
+
+`session.switchTemplate()` moves a Session to another active Template's current
+content. Switching to the Template the Session is already on also applies that
+Template's latest saved content. Persist a key per switch, as for creation:
+
+```ts
+const receipt = await session.switchTemplate({
+  templateId: nextTemplateId,
+  idempotencyKey: switchKey,
+  // acknowledgeSessionRecall: true, when the target enables cross-Session Recall
+});
+if (receipt.status === "pending") {
+  const handoff = await session.getTurn(receipt.handoffTurnId);
+  if (handoff.status !== "running") await session.refresh();
+} else if (receipt.status === "failed") {
+  console.warn(receipt.error.code);
+}
+```
+
+| `status` | Meaning |
+| --- | --- |
+| `unchanged` | The target's content equals the current configuration; nothing changed and no `handoffTurnId` |
+| `succeeded` | The Session is on the target at the receipt's `configurationEpoch`. A first response says this only when the Session had no history, so no Handoff ran |
+| `pending` | The Session has history, so the Handoff Turn `handoffTurnId` runs under the target Template |
+
+A `pending` switch settles when its Handoff Turn does: the Session moves to the
+target, or the switch fails and the Session stays on its previous Template.
+Follow it like any Turn, with `session.getTurn(receipt.handoffTurnId)` or the
+event stream, which reports `agent.session.template_switch.succeeded` or
+`.failed`. `session.refresh()` then shows the new `template` and
+`configurationEpoch`, and `switching` is `false` once it has settled. The receipt
+holds no Session, so `switchTemplate()` never updates `session.data`; call
+`refresh()`. While a switch is pending, new messages and another switch are
+refused with `session_switch_in_progress`.
+
+The service refuses a switch it does not record:
+
+| Error | Cause |
+| --- | --- |
+| `ConflictError` `session_switch_busy` | A Turn is running or a Realtime Connection is live |
+| `ConflictError` `session_switch_in_progress` | Another switch has not settled |
+| `ConflictError` `agent_template_recall_acknowledgment_required` | The target enables cross-Session Recall; pass `acknowledgeSessionRecall: true` |
+| `ConflictError` `session_read_only` | The Session cannot change Template, such as a Template Test Session |
+| `ConflictError` `resource_conflict` | The target's Realtime language is no longer offered, or state changed during admission |
+| `ConflictError` `idempotency_key_reused` | The key was used with a different Session, Template or acknowledgment |
+| `TiDBLinkApiError` 404 `agent_template_unavailable` | The target is archived, missing or its dependencies are unusable |
+| `TiDBLinkApiError` 404 `session_not_found` | The Session or its owner is unavailable |
+| `TiDBLinkApiError` 503 `turn_admission_closed`, `skill_package_store_unavailable` | Temporarily unavailable; retry later |
+
+After a lost response (`OutcomeUnknownError`), repeat the call with the same key
+and input to recover the receipt; the service returns the command's latest
+receipt and records no second switch. Do not poll this way. Commands belong to
+the Organization API Key that sent them, so recover with the same key; after a
+rotation, follow the Session instead. A replay after the Session is deleted or
+its owner loses access is refused with `session_not_found`.
+
+The Handoff Turn summarizes the Session so far for the target Template. History
+reads return it as a Turn with `kind: "template_handoff"`, no `userMessage` and
+an empty `userMessages`; when it succeeds, its assistant Message is the summary.
+The service's
+[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/4305ef67daebf23c416badf806217a7c11dcef37/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
+describes what the Session keeps across a switch (models, Billing Tag, Client
+Tools and creation options) and that cancelling the Handoff Turn fails the
+switch.
 
 ## Text messages and original results
 
@@ -324,7 +474,8 @@ The packaged example uses an existing owned Session and a caller-retained input:
 import { sendMessageWorkflow } from "@tidblink/server/examples/send-message.mjs";
 const result = await sendMessageWorkflow({
   baseUrl: process.env.AGENT_SERVICE_URL,
-  userApiKey: process.env.USER_API_KEY,
+  organizationApiKey: process.env.ORGANIZATION_API_KEY,
+  userId: process.env.END_USER_ID,
   sessionId: process.env.SESSION_ID,
   clientEventId: process.env.CLIENT_EVENT_ID,
   text: process.env.MESSAGE_TEXT,
@@ -337,71 +488,237 @@ final answer. Preserve the input across invocations; each new command identity
 can start new work. This slice replaces the obsolete response-owned NDJSON
 `streamTurn` API. Use the independent progress subscription below.
 
-## Continuous progress and reconnection
+## Progress and Session events
 
-Submit once with a persisted `clientEventId`, then observe that original receipt:
+Progress and events reach the application over a Session connection, not over
+a per-Session stream: `conn.send(text, { onProgress })` reports a message's draft,
+and `session.connect({ onEvent, cursor, onCursor })` follows every event of the
+Session with a resumable cursor (see [Connecting a Session](#connecting-a-session)).
+`waitForResult(inputId)` and `turn()` stay available over plain HTTP for a
+process that keeps no connection, for example to recover a result after a restart.
+
+`asKnownSessionEvent(event)` narrows an event to the types the SDK knows: Turn
+lifecycle, drafts, progress, saved messages and Operation steps, Client Tool
+calls, Realtime transcripts and responses, Template switches and
+`agent.session.idle`. It returns `undefined` for anything else, which is still
+delivered unchanged. A draft (`agent.session.turn.output_text.snapshot`) is a
+complete snapshot: replace what you showed, including with an empty reset.
+
+## Connecting a Session
+
+`session.connect()` attaches a Session to this process's Backend Connection, one
+WebSocket per Application Server process to the core (ADR 0109 of the service).
+It is meant for a backend that stays attached to a Session, for example while
+the user's device is online: it receives the Session's events, and it declares
+and executes the Session's Client Tools. Each connection is one row in the
+core and costs no polling, so attach when the device comes online.
 
 ```ts
-const savedCommandId = crypto.randomUUID();
-// Persist savedCommandId with this message before dispatch.
-const accepted = await session.submitMessage({
-  clientEventId: savedCommandId,
-  text: "Summarize the findings",
+const conn = await organization.user(userId).session(sessionId).connect({
+  tools: lampTools(deviceId),                 // see below
+  cursor: await db.getCursor(deviceId),       // resume after a restart
+  onCursor: (cursor) => db.saveCursor(deviceId, cursor),
+  onTranscript: (t) => app.push(deviceId, { role: "user", text: t.text }),
+  onResponse: (r) => app.push(deviceId, { role: "assistant", text: r.text }),
+  onEvent: (event) => forward(event),         // every event, in order
 });
-let cursor: string | undefined;
-let draft = "";
-for await (const update of session.observe(accepted.inputId, {
-  timeoutMs: 60_000,
-})) {
-  if (update.type === "result") {
-    console.log(update.result.text);
-  } else {
-    cursor = update.event.cursor; // Persist with session.id and accepted.inputId.
-    if (update.type === "draft") draft = update.text; // Replace, including an empty reset.
-    if (update.type === "progress") console.log(update.text);
+conn.closed.then((end) => console.log("connection ended", end.reason));
+// ...when the device goes offline:
+await conn.close();
+```
+
+- **Events.** Callbacks run one event at a time, in the Session's order, and
+  `onCursor` follows once an event's callbacks have completed. Persist that
+  cursor and pass it back as `cursor` to replay what was missed; without one,
+  delivery starts after the Session's latest event and history is not replayed.
+  `onTranscript` and `onResponse` receive completed Realtime transcripts and
+  responses; `onEvent` receives every event, including types the SDK does not
+  know.
+- **Reconnection.** The SDK opens Backend Connections on demand, holds up to the
+  `maxSessions` the core announces on each (1024 today) and opens another when
+  one is full. After a lost connection, or when the core asks a connection to
+  drain before a restart, it re-attaches each Session on another connection from
+  the last processed event, without gaps or repeats. A connection that holds
+  nothing closes after a few seconds. Liveness is checked with an application
+  `ping` when a connection is silent.
+- **One executor per Session.** A connection attaches for execution by default.
+  Another process's connection to the same Session takes it over, and this one
+  ends with `closed` resolving `{ reason: "superseded" }`. One `OrganizationClient`
+  holds at most one connection per Session; reuse it. `observe: true` attaches
+  for events only, never takes the Session over and cannot declare tools.
+- **Ends.** `closed` resolves once: `closed` after `close()` or
+  `organization.close()`, `superseded`, `session_deleted`, or `error` when the
+  connection cannot be restored, for example after the Organization API Key was
+  revoked (a `BackendConnectionClosedError` with code 4001). A refused attach
+  rejects `connect()` with a `BackendRequestError` whose `reason` is the core's,
+  such as `session_not_found`.
+- **Errors in your callbacks** do not stop delivery. They go to `onError`;
+  without it they are rethrown asynchronously, which by default ends a Node.js
+  process.
+
+### Client Tools on a connection
+
+`tools` maps each Client Tool name to its declaration and a `run` function. Each
+attach replaces the Session's whole Client Tool set with these declarations, and
+the connection executes their calls:
+
+```ts
+const lampTools = (deviceId: string): ClientToolHandlers => ({
+  set_light: {
+    description: "Turn the lamp on or off, or set its brightness",
+    parameters: {
+      type: "object",
+      properties: {
+        on: { type: "boolean" },
+        brightness: { type: "integer", minimum: 1, maximum: 100 },
+      },
+    },
+    run: async (args, { signal }) => {
+      // Fail at once when the device is offline, so the model does not wait.
+      const state = await askDevice(deviceId, "set_light", args, { signal });
+      return state.on ? `On at ${state.brightness}%` : "Off";
+    },
+  },
+});
+```
+
+- **Claim before running.** For each call the SDK first asks the core for the
+  right to execute it and runs `run` only when the core grants it, so a call the
+  core reports as not performed was never executed. A call that nobody claims
+  within the core's claim window (5 seconds) is reported to the model as not
+  performed.
+- **Results.** A returned string is what the model receives; other values are
+  sent as JSON. A thrown error becomes a failure whose message the model sees.
+  A tool the connection has no handler for fails with a message saying so.
+  Results go back over any Backend Connection of the Organization and are
+  retried after a lost connection until the call's deadline.
+- **Once per call.** A `callId` runs at most once per connection, even when the
+  core sends it again after a reconnect. If the core's answer to a claim is
+  lost, the SDK does not run the call and closes it as failed.
+- **Deadline.** `run` receives `{ callId, sessionId, userId, turnId, name,
+  deadlineAt, signal }`. At `deadlineAt`, 60 seconds after the call was
+  published, `signal` aborts and the SDK reports a timeout; the core then tells
+  the model the effect is unknown.
+- **After `close()`** calls already running finish and their results are still
+  submitted; later calls are not received.
+
+A result the core does not accept, for example after the call's deadline,
+reaches `onError` as a `ClientToolResultRefusedError` with the core's `reason`.
+Calls are answered only on the executing connection; the `claimBy` they carry in
+`requires_action` events marks them as such.
+
+### Messages and voice on a connection
+
+`conn.send(text, options)` sends a user message over the connection and resolves
+with the same result as `session.turn()`, once the Turn finishes:
+
+```ts
+const reply = await conn.send(text, {
+  clientEventId: savedMessageId,              // optional; persist it to recover after a crash
+  onProgress: (draft) => app.show(deviceId, draft),
+});
+return reply.text;
+```
+
+- The message starts a Turn on an idle Session or steers the active one; the
+  call waits for that Turn either way. Rejections, failures, interruptions and
+  local timeouts raise the same errors as `session.turn()`: `InputNotAppliedError`,
+  `TurnFailedError`, `TurnInterruptedError` and `TurnWaitTimeoutError` (default
+  `timeoutMs` 60 seconds, which never cancels the Turn).
+- The call resolves once the Session has also released the Turn
+  (`agent.session.idle`), so the next `send()`, audio Turn or Template switch
+  starts at once instead of steering a finished Turn or being refused as busy.
+  The release normally follows the result at once; after 5 seconds without it
+  the result is returned anyway.
+- Progress comes from the pushed events, without polling. `onProgress` receives
+  the complete draft each time it grows (today every 1,024 characters): replace
+  what you showed, do not append. When the Turn finishes, the SDK reads the
+  settled result once over REST.
+- `clientEventId` shares the Session's command namespace with REST. Without
+  one the SDK generates a UUID. If a reconnect loses the core's answer, the SDK
+  sends the message again with the same `clientEventId`, which the core
+  deduplicates; if it cannot, the call raises `OutcomeUnknownError` with
+  `inputId`, and `session.waitForResult(inputId)` recovers the result.
+- A refusal of the message command, such as `session_read_only` or
+  `turn_admission_closed`, raises `BackendRequestError` with that code as
+  `reason` and the REST `details`.
+
+`conn.realtimeGrant({ audio?, metadata? })` prepares the Session's Realtime
+connection and returns `{ websocketUrl, connectToken, connectTokenExpiresAt }`
+for a device to join it directly. When a Realtime connection is already live it
+returns a new token for that one, and `audio` is not applied. The token is short
+lived; ask for a new grant each time the device wants to talk.
+
+### Example: a smart lamp
+
+The packaged `lamp-backend.mjs` example is the backend of a lamp that users talk
+to by typing in an app or by speaking to the lamp, with one Session per lamp so
+both share a conversation. `createLampBackend({ baseUrl, organizationApiKey,
+templateId, device, store })` returns:
+
+- `bindDevice(appUserId, deviceId)`: one End User per app user, one Session per lamp.
+- `onDeviceOnline(deviceId)` / `onDeviceOffline(deviceId)`: keep the lamp's Session
+  connected while it is online, with the lamp's tools `set_light`, `get_status`
+  and `set_timer`, which forward each call to the lamp over your device channel.
+- `onAppMessage(deviceId, text, { onDraft })`: a typed message; when the lamp is
+  offline a temporary connection is used and the lamp's tools fail at once.
+- `onDeviceWantsToTalk(deviceId)`: sends the lamp a Realtime grant.
+
+`device` is your channel to the lamps: `isOnline(deviceId)`,
+`request(deviceId, command, args, { signal })` and `send(deviceId, topic,
+payload)`. Wired to MQTT, with the lamp announcing itself through a retained
+presence message:
+
+```js
+const lamps = createLampBackend({ baseUrl, organizationApiKey, templateId, device: mqttDevices(broker) });
+broker.subscribe("lamp/+/presence");
+broker.subscribe("lamp/+/talk");
+broker.on("message", (topic, payload) => {
+  const [, deviceId, kind] = topic.split("/");
+  if (kind === "presence")
+    payload.toString() === "online" ? lamps.onDeviceOnline(deviceId) : lamps.onDeviceOffline(deviceId);
+  if (kind === "talk") lamps.onDeviceWantsToTalk(deviceId);
+});
+app.post("/devices/:id/messages", async (req, res) =>
+  res.json({ text: await lamps.onAppMessage(req.params.id, req.body.text) }));
+```
+
+The lamp itself does not use the SDK. Its firmware, in pseudo-code:
+
+```c
+mqtt_connect(broker, will = { "lamp/{id}/presence", "offline", retain });
+mqtt_publish("lamp/{id}/presence", "online", retain);
+
+on_message("lamp/{id}/cmd", msg) {            // a Client Tool call, forwarded
+  switch (msg.command) {
+    case "set_light":  apply(msg.args); reply(msg.requestId, ok, state()); break;
+    case "get_status": reply(msg.requestId, ok, { ...state(), ambientLux: lux() }); break;
+    case "set_timer":  timer_start(msg.args.minutes * 60, led_off); reply(msg.requestId, ok, {}); break;
+    default:           reply(msg.requestId, error, "unknown command");
   }
+}
+
+on_button_press() { mqtt_publish("lamp/{id}/talk", ""); }
+
+on_message("lamp/{id}/voice_grant", grant) {  // audio goes to TiDB Link directly
+  ws = websocket_connect(grant.websocketUrl, grant.connectToken);
+  while (ws.open) { ws.send(mic_read(20ms)); if (ws.has_audio()) speaker_play(ws.recv()); }
 }
 ```
 
-`draft` is provisional, and a progress update or saved-message event is not a
-successful result. Only `type: "result"` establishes the original command's
-successful outcome using its durable receipt and matching saved Turn. Failures,
-interruption and unincorporated inputs use the same errors as `waitForResult()`.
-A later explicit retry cannot replace the earlier command's result. `observe()`
-also accepts the separate retry command identity, using the same original-result
-checks as `waitForResult()`; cancellation receipts are not answer receipts.
+Cloud capabilities such as a warranty lookup belong in a Connector the
+Template references (see [Connectors](#connectors)), not in the lamp's tools.
 
-`ObservationStoppedError` retains `sessionId`, `inputId`, `turnId` when known,
-the last `cursor`, and `timedOut`. On disconnect, local abort or timeout, preserve
-those values. Reconnect with `session.observe(inputId, { cursor })`, or query
-`getInteraction(inputId)` / `waitForResult(inputId)`; do not submit another message.
-Breaking the loop stops only observation. EOF, a revoked observer credential,
-Session idleness and the absence of subscribers do not establish success or cancel
-execution. With revoked credentials, use another currently authorized credential
-for recovery. The SDK does not automatically reconnect or resubmit.
-
-`session.events({ cursor, signal })` exposes the independent Session-wide stream
-as raw envelopes with `cursor`, `type`, `sessionId`, `turnId`, `createdAt` and
-`data`, including Realtime and unfamiliar event types. It ends when its connection
-ends; it has no execution-result promise. `observe()` selects the original Turn,
-exposes typed draft/progress text and raw other events, and confirms its original
-receipt before reporting a result. A missing/expired cursor is the service's
-`validation_error` refusal; it does not silently start replay from the beginning.
-A resumed draft is a complete snapshot, usable without earlier frames.
-
-The packaged `observe-message.mjs` example observes an existing input and never
-submits it again. Run it with `AGENT_SERVICE_URL`, `USER_API_KEY`, `SESSION_ID` and
-`INPUT_ID`; supply `EVENT_CURSOR` to resume:
-
-```sh
-node node_modules/@tidblink/server/examples/observe-message.mjs
-```
+The connection uses the global `WebSocket` of Node.js 22, which sends the
+Organization API Key in the upgrade's `Authorization` header and never in the
+URL. Pass `WebSocket` to `OrganizationClient` to use another implementation; it
+must accept `new WebSocket(url, { protocols, headers })`.
 
 ## Session Client Tools
 
-Declare the application functions that an ordinary text Turn may request. The
-application executes them itself; the SDK only declares tools and exchanges calls
-and results. Parameters are JSON Schema objects. The service validates reserved
+Declare the application functions that a Turn may request. `connect({ tools })`
+declares them on every attach; the REST methods below read or replace the set
+without a connection. Parameters are JSON Schema objects. The service validates reserved
 names, schema size/depth and combined tool limits; the `async` argument is reserved
 for the platform and is not part of application arguments.
 
@@ -418,7 +735,8 @@ const tools: ClientToolDeclaration[] = [{
     additionalProperties: false,
   },
 }];
-const session = await agent.createSession({
+const session = await customer.createSession({
+  templateId: savedTemplateId,
   idempotencyKey: savedSessionCreationKey,
   tools,
 });
@@ -429,54 +747,12 @@ await session.replaceClientTools(tools, { ifMatch: current.etag });
 Replacement is the complete set, with `[]` clearing it. Its ETag is independent of
 the Session's model ETag. Stale replacement returns `precondition_failed`; read the
 set and decide again. A Turn retains the declarations admitted when it started.
-An identical replacement keeps its revision. Scheduler and audio inputs do not
-use the Session-client declarations under this service baseline.
+An identical replacement keeps its revision. Text, voice and prerecorded-audio Turns
+use the Session's declarations; Scheduler-started Turns do not.
 
-After submitting a message, retrieve pending calls independently of any progress
-subscription:
-
-```ts
-const calls = await session.listPendingClientToolCalls();
-const call = calls.find((call) => call.callId === savedCallId);
-if (!call || Date.parse(call.deadlineAt) <= Date.now()) {
-  throw new Error("The call is unavailable or expired; do not execute it again");
-}
-// The application obtains this value from its own business function.
-const output = JSON.stringify({ status: "shipped" });
-const receipt = await session.submitClientToolOutput({
-  clientEventId: savedOutputCommandId,
-  turnId: call.turnId,
-  callId: call.callId,
-  output,
-});
-// To report a business failure, supply error: { message: "Warehouse unavailable" }
-// instead of output.
-```
-
-The result command has its own stable `clientEventId`; it is distinct from the
-call's `callId` and the message's input identity. Its receipt confirms admission,
-not successful completion of the message. Continue with the original message's
-`waitForResult(inputId)` or `observe(inputId)`. An application-reported tool error
-may still produce a successful answer explaining that failure.
-
-Pending reads count as delivery and preserve `publishedAt`/`deadlineAt`. Calls
-have a 60-second deadline from publication. Retain the call identity and the
-application's result before submission; a disconnect does not authorize executing
-the business function again. After uncertain submission, reconcile its original
-command with `getInteraction(clientEventId)` or `reconcileInteraction(clientEventId)`.
-The SDK never retries output submission automatically. Repeating the exact command
-recovers its original receipt; a new command for a settled call is refused with
-`client_tool_call_settled`. Foreign, unknown and Hardware calls are unavailable
-through this endpoint. Hardware results belong to the device connection and are
-not an SDK Client Tool capability.
-
-The packaged `answer-client-tool.mjs` example submits one already produced result.
-Set `AGENT_SERVICE_URL`, `USER_API_KEY`, `SESSION_ID`, `TURN_ID`, `CALL_ID`,
-`CLIENT_EVENT_ID` and exactly one of `TOOL_OUTPUT` or `TOOL_ERROR`:
-
-```sh
-node node_modules/@tidblink/server/examples/answer-client-tool.mjs
-```
+An executing Session connection runs the calls of these tools; see
+[Client Tools on a connection](#client-tools-on-a-connection). There is no REST
+path to answer a call.
 
 ## Saved conversation history
 
@@ -556,7 +832,7 @@ request, not network recovery.
 The installed `@tidblink/server/examples/control-turn.mjs` exports
 `controlTurnWorkflow`. It returns cancellation acceptance for `action: "cancel"`
 and waits for the separate retry result for `action: "retry"`. Run it with
-`AGENT_SERVICE_URL`, `USER_API_KEY`, `SESSION_ID`, `TURN_ID`, `CLIENT_EVENT_ID` and
+`AGENT_SERVICE_URL`, `ORGANIZATION_API_KEY`, `END_USER_ID`, `SESSION_ID`, `TURN_ID`, `CLIENT_EVENT_ID` and
 `TURN_ACTION` set; retain those identities before dispatch. This example never
 chooses to retry automatically.
 
@@ -567,12 +843,12 @@ owned Session for a terminal. The SDK returns the one-time connect token but doe
 not open or implement the WebSocket transport.
 
 ```ts
-import { UserClient } from "@tidblink/server";
+import { OrganizationClient } from "@tidblink/server";
 
-const user = new UserClient({
+const user = new OrganizationClient({
   baseUrl: process.env.AGENT_SERVICE_URL!,
-  apiKey: process.env.USER_API_KEY!,
-});
+  apiKey: process.env.ORGANIZATION_API_KEY!,
+}).user(process.env.END_USER_ID!);
 const catalog = await user.listRealtimeModels();
 const session = user.session(process.env.SESSION_ID!);
 const current = await session.getRealtimeModelSelection();
@@ -608,13 +884,14 @@ import { prepareRealtimeConnection } from "@tidblink/server/examples/prepare-rea
 
 const prepared = await prepareRealtimeConnection({
   baseUrl: process.env.AGENT_SERVICE_URL,
-  userApiKey: process.env.USER_API_KEY,
+  organizationApiKey: process.env.ORGANIZATION_API_KEY,
+  userId: process.env.END_USER_ID,
   sessionId: process.env.SESSION_ID,
   realtimeModelId: process.env.REALTIME_MODEL_ID,
 });
 ```
 
-Set `AGENT_SERVICE_URL`, `USER_API_KEY`, and `SESSION_ID` to run the example
+Set `AGENT_SERVICE_URL`, `ORGANIZATION_API_KEY`, `END_USER_ID`, and `SESSION_ID` to run the example
 directly. `REALTIME_MODEL_ID` is optional.
 
 ## Prerecorded audio
@@ -660,7 +937,7 @@ does not resubmit a recording automatically. A transcription refusal may still
 have consumed provider work; it does not imply a refunded charge.
 
 The installed `submit-audio.mjs` example reads an existing file and prints the
-final answer. Set `AGENT_SERVICE_URL`, `USER_API_KEY`, `SESSION_ID` and
+final answer. Set `AGENT_SERVICE_URL`, `ORGANIZATION_API_KEY`, `END_USER_ID`, `SESSION_ID` and
 `AUDIO_FILE_PATH`; `AUDIO_CONTENT_TYPE` is optional:
 
 ```sh
@@ -731,7 +1008,7 @@ API Key. Files are held in memory while hashing or downloading, so size your
 backend's concurrency for the service's advertised maximum.
 
 The packaged `upload-file.mjs` example uploads and attaches one file. Set
-`AGENT_SERVICE_URL`, `USER_API_KEY`, `SESSION_ID`, `FILE_PATH`,
+`AGENT_SERVICE_URL`, `ORGANIZATION_API_KEY`, `END_USER_ID`, `SESSION_ID`, `FILE_PATH`,
 `UPLOAD_IDEMPOTENCY_KEY`, and `CLIENT_EVENT_ID`, then run:
 
 ```sh
@@ -743,110 +1020,28 @@ The example returns the final conversation result; its exported
 directories or write Session text files. Organization owner-scoped clients can
 upload, read and attach the same ordinary Files.
 
-## Scheduled work
-
-`user.schedulers` uses the full customer Scheduler API. A new-Session schedule
-requires an owned Agent; a bound-Session schedule supplies only its Session.
-The service resolves the Agent from that Session.
-
-```ts
-const created = await customer.schedulers.create({
-  agentId: agent.id,
-  title: "Morning report",
-  prompt: "Summarize the latest activity.",
-  schedule: { kind: "cron", cronExpr: "0 9 * * *", timezone: "Asia/Shanghai" },
-  idempotencyKey: savedSchedulerKey,
-});
-const current = await customer.schedulers.get(created.scheduler.schedulerId);
-const updated = await customer.schedulers.update(
-  current.scheduler.schedulerId,
-  { enabled: false },
-  { ifMatch: current.etag },
-);
-const history = await customer.schedulers.fires(current.scheduler.schedulerId, {
-  limit: 20,
-});
-```
-
-For one-time work use exactly one of `{ kind: "once", runAt: isoTimestamp }` or
-`{ kind: "once", after: "1h30m" }`. `runAt` includes a timezone offset; cron
-requires an IANA timezone. The service owns timing and validation. Optional
-`validFrom` and `validUntil` restrict the execution window. A bound-Session create
-uses `delivery: { target: "bound_session", sessionId }` and omits `agentId`.
-
-Creation returns `{ scheduler, etag }`. Persist the key and exact input before
-calling. A same-key replay returns the **original creation response and ETag**,
-even if the Scheduler has since changed; use `get()` for current state before an
-edit. A changed input with that key is refused. Uncertain responses raise
-`OutcomeUnknownError` rather than repeating the command automatically.
-`idempotency_in_progress` retains the service's raw `retryAfter` header on the
-error so the application can decide when to replay the original request.
-
-`update(id, changes, { ifMatch })` and `delete(id, { ifMatch })` require a
-previously read ETag. Stale writes retain the service's 412 conflict; the SDK
-never refreshes and overwrites another writer's changes. Updates support title,
-prompt, Agent/delivery target, schedule, enabled state, validity window and
-`snoozeUntil`. Enabling an elapsed one-time schedule requires a future time.
-Disabling or deleting a Scheduler does not roll back completed effects. Deleted
-Schedulers are no longer available through detail or fire-history reads.
-`organization.user(userId).schedulers.list({ status: "deleted" })` returns their
-retained tombstones. User-Key lists accept only `enabled` or `disabled`; both
-list surfaces omit deleted records by default.
-
-`list({ status, limit, cursor })` and `fires(id, { limit, cursor })` return
-`nextCursor` rather than `hasMore`. Cursors retain their original owner/filter
-scope. Each fire preserves its execution prompt and delivery snapshot; later
-Scheduler edits cannot rewrite it. `pending` is not success. A `completed` fire
-or a `failed` fire retains nullable result identities and a nullable failure code.
-When `result.sessionId` and `result.turnId` are present, read the saved Turn with
-`customer.session(sessionId).getTurn(turnId)`; do not invent a message identity
-when `messageId` is null.
-
-The installed `schedule-task.mjs` example creates one scheduled task, waits
-locally for a settled fire and reads its associated Turn. Set `AGENT_SERVICE_URL`,
-`USER_API_KEY`, `AGENT_ID`, `SCHEDULER_IDEMPOTENCY_KEY`, `SCHEDULE_RUN_AT` and
-`SCHEDULE_PROMPT`, then run:
-
-```sh
-node node_modules/@tidblink/server/examples/schedule-task.mjs
-```
-
-A local example timeout leaves the schedule active and prints its identity for
-later fire-history reads. The separate Scheduler plans API is outside this SDK.
-
 ## Errors and uncertain outcomes
 
-Organization, text/progress/history and refreshed Agent/Session lifecycle methods accept
+Organization, text/progress/history and Session lifecycle methods accept
 `{ requestId?, signal? }` options; creation and list options include these fields.
 `TiDBLinkApiError` preserves status, service code, request identity and details;
 `ConflictError` preserves explicit 409/412 conflicts. The service's response
 request identity takes precedence over the one sent.
 
-Safe reads and keyed Agent/Session creation use bounded retries with the same
-request identity and creation key. User creation, key issuance, preference and
-Session updates, unlinking, deletion and Realtime mutations are never
+Safe reads, keyed Session creation and Template switches use bounded retries
+with the same request identity and key. User creation,
+Session updates, deletion and Realtime mutations are never
 automatically replayed. Disconnects, unusable success responses, HTTP 408 and
 server failures during these mutations raise `OutcomeUnknownError`. For an HTTP failure, its
-`cause` retains the `TiDBLinkApiError`. Repeating revoke is safe, but an ambiguous
-failure still reports an unknown outcome. `AbortSignal` stops the local request;
+`cause` retains the `TiDBLinkApiError`. `AbortSignal` stops the local request;
 after dispatch it does not establish whether a mutation happened. Redirects are
 refused.
 
-After uncertain User creation, list and match the original `externalId`.
-After uncertain issuance or rotation, listing keys can confirm metadata but
-**cannot recover the one-time token**. Reconcile metadata and explicitly revoke
-any unwanted key before deciding whether to issue again. The provisioning
-example never repeats an uncertain credential operation.
+After uncertain End User creation, repeat it with the same `externalId`.
 
-Credential receipts must match the requested User (creation) or API Key
-(rotation/revocation), with the expected status. Issued tokens must also match
-their key metadata. A mismatched or unusable success receipt raises
-`OutcomeUnknownError` with the request identity; it never triggers an automatic
-credential retry.
-
-After uncertain Agent/Session creation, repeat the original input with the same
-creation key. After an uncertain preference, name, tag or model update, read the
-resource before deciding on another change. Unlinking and deletion can hide a
+After uncertain Session creation or Template switch, repeat the original input
+with the same key. After an uncertain name, tag or model update, read the
+resource before deciding on another change. Deletion can hide a
 resource from ordinary reads, so a missing resource does not recover its original
 mutation receipt.
 
@@ -857,27 +1052,22 @@ new token after reconciling the connection state.
 
 ## User usage
 
-A User client reads its own usage. An Organization client must name a target User
-in that Organization. These are distinct response projections and date contracts:
+`organization.getUserUsage(userId, options)` and
+`organization.getUserUsageDetails(userId, options)` read one target User's usage.
 
-| Read | User client | Organization client |
-| --- | --- | --- |
-| Summary | `getUsage(options)` | `getUserUsage(userId, options)` |
-| Details | `getUsageDetails(options)` | `getUserUsageDetails(userId, options)` |
-| Range | Optional inclusive UTC dates, `YYYY-MM-DD`; at most 370 days | Required exact UTC timestamps with milliseconds, inclusive `from` and exclusive `to`; at most 31 days |
-| Buckets | `period: "day"` or `"week"` chooses the default range; series remains daily | `interval: "hour"`, `"day"`, `"week"` or `"month"` |
-| Detail limits | Separate `llm`, `sandbox` and `webSearch` arrays; `limit` applies per kind, with no cursor | Globally ordered `items`; optional `kind`, `limit` and opaque `cursor`; `nextCursor: null` ends the stream |
+| | |
+| --- | --- |
+| Range | Required exact UTC timestamps with milliseconds, inclusive `from` and exclusive `to`; at most 31 days |
+| Buckets | `interval: "hour"`, `"day"`, `"week"` or `"month"` |
+| Details | Globally ordered `items`; optional `kind`, `limit` (1 to 500) and opaque `cursor`; `nextCursor: null` ends the stream |
 
 Both support an exact `tagKey`/`tagValue` pair. Send both or neither. Values retain
-case sensitivity and the service's normalization rules. Preserve the original
-range, kind and tag filters when following an Organization cursor. Details accept
-limits from 1 to 500. The User detail endpoint cannot retrieve older rows beyond
-its limit through a fabricated continuation; Organization details support paging.
+case sensitivity and the service's normalization rules. Both also accept
+`templateId`, which keeps only usage admitted under that Template; each detail
+item reports it as `agentTemplateId`. Preserve the original range, kind, Template
+and tag filters when following a cursor.
 
 ```ts
-const own = await user.getUsage({
-  from: "2030-01-02", to: "2030-01-02", period: "day",
-});
 const page = await organization.getUserUsageDetails(targetUserId, {
   from: "2030-01-02T00:00:00.000Z",
   to: "2030-01-03T00:00:00.000Z",
@@ -892,14 +1082,12 @@ an unpriced fact billable. Priced totals exclude unpriced facts. Scalar cost tot
 costs; `costByBearer` preserves the separate platform, customer and unknown
 categories. Public-list estimates are not supplier invoices or known final charges. Fact completeness and
 valuation completeness are independent. Do not display missing costs as zero or
-infer a balance from these reads. Organization projections intentionally omit
-some details available in the User's own projection.
+infer a balance from these reads.
 
 The installed example `@tidblink/server/examples/read-usage.mjs` exports
-`readOwnUsage` and `readUserUsage`, each returning a summary and the first detail
-page. The CLI requires `AGENT_SERVICE_URL` and `USAGE_AUTHORITY=user` with
-`USER_API_KEY`, or `USAGE_AUTHORITY=organization` with `ORGANIZATION_API_KEY` and
-`END_USER_ID`. Supply `USAGE_FROM`/`USAGE_TO` in the corresponding date format;
+`readUserUsage`, returning a summary and the first detail page. The CLI requires
+`AGENT_SERVICE_URL`, `ORGANIZATION_API_KEY` and `END_USER_ID`. Supply
+`USAGE_FROM`/`USAGE_TO` as exact UTC timestamps;
 `TAG_KEY`/`TAG_VALUE` are optional. It performs reads only and does not claim that
 a first detail page is complete history.
 
@@ -922,7 +1110,7 @@ packed artifact in a clean ESM TypeScript consumer. To verify the packed SDK and
 its examples against the real service, use the service's Node.js 26 runtime, install its
 pinned dependencies, generate Prisma, build its Hardware contract and prepare its
 current schema in a **dedicated test database**. See the selected service's
-[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/882287809f91d9a3fdf60537460431d9f0fc23e7/docs/prisma-first-tidb-validation-and-rollout.md).
+[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/4305ef67daebf23c416badf806217a7c11dcef37/docs/prisma-first-tidb-validation-and-rollout.md).
 
 ```sh
 AGENT_SERVICE_ROOT=/path/to/agent-stack \
@@ -944,11 +1132,11 @@ The compiled fixture reuses the service system harness, its isolated database,
 controlled model/storage/ASR/voice dependencies and real background runner. A
 separate process installs the tarball in a clean directory and calls only the
 installed SDK and packaged Organization example for its application workflow.
-It verifies Organization provisioning without a User Key, discovery, Agent/Session
+It verifies Organization provisioning, discovery, Session
 creation replay, owner isolation, file upload/download and message attachment,
-text results, SSE/history, Client Tools, audio, Scheduler fires and deleted history,
-Realtime HTTP grants, rotation/revocation and fresh-authority recovery. A separate
-User-Key control reads the same retained resources. Management credential changes
+text results and history, Client Tools on a Backend Connection, Connector registration and a Session's call
+to the example HTTP Connector, audio,
+Realtime HTTP grants, rotation/revocation and fresh-authority recovery. Management credential changes
 and controlled suppliers are fixture actions, not claimed SDK APIs. WebSocket
 redemption, live speech suppliers, physical hardware and deployment compatibility
 are outside this SDK proof.
@@ -957,18 +1145,23 @@ The remaining fixtures use the service's existing AppModule test seam and reset
 all rows in the selected dedicated test database before and after their runs.
 They use genuine credentials, real TiDB and controlled dependencies. Their scope:
 Fixtures prepare identities, Templates and eligible
-Realtime Sessions. A composed installed quickstart provisions one fresh User/key,
-discovers Templates/models, creates an Agent and Session, obtains a final answer
+Realtime Sessions. A composed installed quickstart provisions one fresh User,
+discovers Templates/models, creates a Session, obtains a final answer
 and recovers the same original result. Public SDK methods also verify ownership,
-lifecycle updates and Realtime operations. Text cases
+lifecycle updates, Template switches with and without a Handoff Turn, and Realtime
+operations. Text cases
 exercise actual acceptance, final success/failure/interruption, local timeout and
 abandoned-wait recovery, response-loss reconciliation, and paginated mixed
-history through public SDK methods. Progress cases verify draft replacement, cursor
-reconnection/refusal, original-result confirmation, local observation timeout and
-live credential revocation without remote cancellation. Client Tool cases declare and replace tools, resume pending reads, explicitly return
-application output or errors, and observe those values in real Runtime answers, with
-ownership, stale revision, settled-call and unavailable-call refusals. A forwarding proxy drops only
-an actual service response to prove uncertain-submission recovery. Control cases
+history through public SDK methods. Client Tool cases declare and replace tools
+with ownership and stale-revision refusals. Backend Connection cases attach
+Sessions, run the real Runtime's Client Tool calls through claim and result,
+send messages with drafts, failures, timeouts and cancellation, resume from a
+cursor, supersede connections and grant Realtime tokens. A second compiled
+fixture runs two replicas behind a local load balancer: a Turn on one replica
+calls the tool of an attachment on the other, a draining replica moves the
+attachment to the other one, a dropped connection replays its events, and
+another process supersedes the connection. A forwarding proxy drops only an actual service response to prove
+uncertain-submission recovery. Control cases
 verify active-Turn steering, eventual cancellation, disabled retry and an explicitly
 enabled checkpoint retry with an unchanged original outcome. The enabled fixture
 uses the existing controlled Drive9 and model suppliers. File cases use a separate
@@ -977,16 +1170,12 @@ They verify inline, multipart and empty uploads, cancellation and invalid conten
 large-file download-ticket redemption, and a real Runtime file read whose answer
 contains the uploaded content. The installed upload example exercises the same
 public workflow. Real supplier deployment certification is outside this evidence.
-Scheduler cases enable the real background runner and use SDK-created schedules
-to verify successful and failed execution, delivery changes, retained fire
-snapshots and the installed example.
-Audio cases use the real transcription adapter with a controlled HTTP supplier and
-real spend limits. They cover recorded input, malformed/unsupported recordings,
-supplier and budget refusals, model failure, active-response interruption and the
-installed audio example.
-The public Session projection exposes the frozen Template digest but hides stored
-Agent preferences. Preference snapshots and active-Turn model freezing also rely
-on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/882287809f91d9a3fdf60537460431d9f0fc23e7/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
+Audio cases use the real transcription adapter with a controlled HTTP supplier.
+They cover recorded input, malformed/unsupported recordings, supplier refusals,
+model failure, active-response interruption and the installed audio example.
+The public Session projection exposes the frozen Template digest but hides the
+stored creation options. Those snapshots and active-Turn model freezing also rely
+on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/4305ef67daebf23c416badf806217a7c11dcef37/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
 prove those hidden values.
 Usage cases seed controlled facts and verify both public projections, exact filters,
 paging and authority without executing messages to manufacture billing data.

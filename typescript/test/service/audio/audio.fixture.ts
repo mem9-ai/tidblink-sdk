@@ -13,12 +13,12 @@ import {
   getAppPersistencePorts,
 } from "../test/support/app-testing-module";
 import { loadE2eEnv } from "../test/support/e2e-env";
-import { UserApiKeyService } from "../src/auth/user-api-key.service";
+import { OrganizationApiKeyService } from "../src/auth/organization-api-key.service";
+import { seedFixtureTemplate } from "../test/support/published-template-fixture";
 import { AgentTemplateContentSchema } from "../src/agent-templates/agent-template-content";
 import { createAgentServiceFastifyAdapter } from "../src/common/fastify-adapter";
 import { ENV } from "../src/config/config.module";
 import { DEFAULT_ORG_ID } from "../src/chat/dto";
-import { BillingUsageStore } from "../src/billing/billing-usage-store";
 import { developmentReleaseServices } from "../test/support/ops-release-fixture";
 import { AGENT_MODEL_NAMES } from "../src/agent-models/agent-model-registry";
 import type { StreamFn, AssistantMessage } from "@earendil-works/pi-ai";
@@ -171,44 +171,26 @@ afterAll(async () => {
   if (temporary) await rm(temporary, { recursive: true, force: true });
 });
 
-it("the installed SDK submits actual audio through transcription, budget and Runtime boundaries", async () => {
+it("the installed SDK submits actual audio through transcription and Runtime boundaries", async () => {
   const fixture = app.get(AppTestingPersistenceFixture);
-  const keys = app.get(UserApiKeyService);
+  const organizationKey = await app.get(OrganizationApiKeyService).create({
+    organizationId: DEFAULT_ORG_ID,
+    name: "SDK fixture",
+    createdByUserId: null,
+  });
   const users = await Promise.all(
-    ["owner", "stranger", "budget"].map(async (displayName) => {
-      const user = await fixture.arrangeEndUser({
+    ["owner", "stranger"].map((displayName) =>
+      fixture.arrangeEndUser({
         organizationId: DEFAULT_ORG_ID,
         displayName,
-      });
-      const key = await keys.create({
-        organizationId: DEFAULT_ORG_ID,
-        userId: user.userId,
-        name: "SDK Audio",
-      });
-      return { ...user, token: key.token };
-    }),
+      }),
+    ),
   );
-  const [owner, stranger, budget] = users;
-  const billing = app.get(BillingUsageStore);
-  for (const user of [owner!, budget!]) {
-    const limit = await billing.getUserLlmSpendLimitView({
-      organizationId: DEFAULT_ORG_ID,
-      userId: user.userId,
-    });
-    const updated = await billing.mutateLlmSpendLimit({
-      organizationId: DEFAULT_ORG_ID,
-      scope: { kind: "member", userId: user.userId },
-      expectedRevision: limit!.revision,
-      // ASR reserves its conservative USD 20 maximum before transcription.
-      monthlyBaseMicros: user === budget ? 0 : 1_000_000_000,
-      actorUserId: owner!.userId,
-    });
-    if (user === budget) expect(updated?.availableMicros).toBe(0);
-  }
+  const [owner, stranger] = users;
   const templateId = `template_${randomUUID().replaceAll("-", "")}`;
-  await getAppPersistencePorts(app).agentStore.createAgentTemplate({
+  await seedFixtureTemplate(getAppPersistencePorts(app).templateStore, {
     organizationId: DEFAULT_ORG_ID,
-    agentTemplateId: templateId,
+    templateId,
     name: "SDK Audio",
   });
   await fixture.arrangeAgentTemplateContent({
@@ -262,16 +244,15 @@ it("the installed SDK submits actual audio through transcription, budget and Run
         env: {
           ...process.env,
           SDK_SERVICE_URL: await app.getUrl(),
-          SDK_USER_KEY: owner!.token,
-          SDK_FOREIGN_USER_KEY: stranger!.token,
-          SDK_AUDIO_BUDGET_USER_KEY: budget!.token,
+          SDK_ORGANIZATION_KEY: organizationKey.token,
+          SDK_USER_ID: owner!.userId,
+          SDK_FOREIGN_USER_ID: stranger!.userId,
           SDK_TEMPLATE_ID: templateId,
         },
         maxBuffer: 4 * 1024 * 1024,
       },
     );
     console.log(result.stdout);
-    expect(transcribed).not.toContain("budget.wav");
   } catch (error) {
     const output = error as Error & { stdout?: string; stderr?: string };
     throw new Error(

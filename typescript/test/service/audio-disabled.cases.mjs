@@ -1,18 +1,17 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { UserClient, TiDBLinkApiError } from "@tidblink/server";
+import { OrganizationClient, TiDBLinkApiError } from "@tidblink/server";
 
 test("the actual unconfigured transcription deployment refuses audio explicitly", async () => {
-  const user = new UserClient({
-    baseUrl: process.env.SDK_SERVICE_URL,
-    apiKey: process.env.SDK_USER_KEY,
-  });
-  const agent = await user.createAgent({
-    agentTemplateId: process.env.SDK_TEMPLATE_ID,
+  const user = new OrganizationClient({
+  baseUrl: process.env.SDK_SERVICE_URL,
+  apiKey: process.env.SDK_ORGANIZATION_KEY,
+}).user(process.env.SDK_USER_ID);
+  const session = await user.createSession({
+    templateId: process.env.SDK_TEMPLATE_ID,
     idempotencyKey: randomUUID(),
   });
-  const session = await agent.createSession({ idempotencyKey: randomUUID() });
   await assert.rejects(
     session.audio({
       filename: "voice.wav",
