@@ -8,17 +8,17 @@ languages.
 
 ## Scenarios
 
-| Scenario | What it shows | TypeScript |
-|---|---|---|
-| [Smart lamp](lamp/README.md) | One Session per device, shared by typed messages and voice; device functions as Client Tools; Realtime grants for the device | [lamp-backend.mjs](../typescript/examples/lamp-backend.mjs) |
-| Create a Session | Create a Session from a Template with an idempotent creation key | [create-session.mjs](../typescript/examples/create-session.mjs) |
-| Send a message | Submit text and wait for the result; recover with the same command identity | [send-message.mjs](../typescript/examples/send-message.mjs) |
-| Control a Turn | Cancel or retry a Turn from its checkpoint | [control-turn.mjs](../typescript/examples/control-turn.mjs) |
-| Upload a file | Upload a file and attach it to a message | [upload-file.mjs](../typescript/examples/upload-file.mjs) |
-| Submit audio | Submit prerecorded audio as a Turn | [submit-audio.mjs](../typescript/examples/submit-audio.mjs) |
-| Prepare Realtime | Prepare a Session's Realtime connection for a terminal | [prepare-realtime-connection.mjs](../typescript/examples/prepare-realtime-connection.mjs) |
-| Read usage | Read a User's usage by period and billing tag | [read-usage.mjs](../typescript/examples/read-usage.mjs) |
-| HTTP Connector | A minimal MCP server that verifies platform callbacks | [http-connector.mjs](../typescript/examples/http-connector.mjs) |
+| Scenario | What it shows | TypeScript | Python |
+|---|---|---|---|
+| [Smart lamp](lamp/README.md) | One Session per device, shared by typed messages and voice; device functions as Client Tools; Realtime grants for the device | [lamp-backend.mjs](../typescript/examples/lamp-backend.mjs) | [lamp_backend.py](../python/examples/lamp_backend.py) |
+| Create a Session | Create a Session from a Template with an idempotent creation key | [create-session.mjs](../typescript/examples/create-session.mjs) | [create_session.py](../python/examples/create_session.py) |
+| Send a message | Submit text and wait for the result; recover with the same command identity | [send-message.mjs](../typescript/examples/send-message.mjs) | [send_message.py](../python/examples/send_message.py) |
+| Control a Turn | Cancel or retry a Turn from its checkpoint | [control-turn.mjs](../typescript/examples/control-turn.mjs) | [control_turn.py](../python/examples/control_turn.py) |
+| Upload a file | Upload a file and attach it to a message | [upload-file.mjs](../typescript/examples/upload-file.mjs) | [upload_file.py](../python/examples/upload_file.py) |
+| Submit audio | Submit prerecorded audio as a Turn | [submit-audio.mjs](../typescript/examples/submit-audio.mjs) | [submit_audio.py](../python/examples/submit_audio.py) |
+| Prepare Realtime | Prepare a Session's Realtime connection for a terminal | [prepare-realtime-connection.mjs](../typescript/examples/prepare-realtime-connection.mjs) | [prepare_realtime_connection.py](../python/examples/prepare_realtime_connection.py) |
+| Read usage | Read a User's usage by period and billing tag | [read-usage.mjs](../typescript/examples/read-usage.mjs) | [read_usage.py](../python/examples/read_usage.py) |
+| HTTP Connector | A minimal MCP server that verifies platform callbacks | [http-connector.mjs](../typescript/examples/http-connector.mjs) | [http_connector.py](../python/examples/http_connector.py) |
 
 Add a column when a new SDK lands, and link each example it provides.
 
