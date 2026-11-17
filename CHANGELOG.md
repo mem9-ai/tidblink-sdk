@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0-rc.2
+
 - Align with service
   [c21a5e3a](https://github.com/mem9-ai/agent-stack/commit/c21a5e3a091c938576ee3bb36cba72baf0e87022),
   which removes the per-Session event subscription and answering Client Tool
