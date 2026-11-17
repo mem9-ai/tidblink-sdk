@@ -65,11 +65,13 @@ import {
   listInteractions,
   history,
   getTurn,
+  getTurnState,
   timeline,
   type SessionInteraction,
   type SessionInteractionPage,
   type TurnRecord,
   type TurnPage,
+  type TurnState,
   type SessionTimelinePage,
 } from "./history.js";
 import type { ListOptions } from "./http.js";
@@ -427,6 +429,14 @@ export class Session {
 
   getTurn(turnId: string, options?: RequestOptions): Promise<TurnRecord> {
     return getTurn(this.#http, this.id, turnId, options);
+  }
+
+  /**
+   * Read a Turn with `stopRequestedAt`, when a request to stop its current
+   * execution was accepted. A Turn can still be running after a stop request.
+   */
+  getTurnState(turnId: string, options?: RequestOptions): Promise<TurnState> {
+    return getTurnState(this.#http, this.id, turnId, options);
   }
 
   timeline(options?: ListOptions): Promise<SessionTimelinePage> {

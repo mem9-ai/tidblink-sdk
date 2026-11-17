@@ -1,0 +1,33 @@
+[
+  {
+    "type": "function",
+    "name": "set_light",
+    "description": "Turn the lamp on or off, or set its brightness and colour temperature",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "on": { "type": "boolean", "description": "true turns the lamp on, false off" },
+        "brightness": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Percent" },
+        "colorTemp": { "type": "integer", "minimum": 2700, "maximum": 6500, "description": "Kelvin" }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_status",
+    "description": "Read the lamp's state and the ambient light",
+    "parameters": { "type": "object", "properties": {}, "additionalProperties": false }
+  },
+  {
+    "type": "function",
+    "name": "set_timer",
+    "description": "Turn the lamp off after some minutes",
+    "parameters": {
+      "type": "object",
+      "properties": { "minutes": { "type": "integer", "minimum": 1, "maximum": 240 } },
+      "required": ["minutes"],
+      "additionalProperties": false
+    }
+  }
+]

@@ -2,7 +2,7 @@
 export const TIDB_LINK_API_VERSION = "0.0.1" as const;
 /** Exact service baseline for the supported refreshed SDK surface. */
 export const TIDB_LINK_REVISION =
-  "4305ef67daebf23c416badf806217a7c11dcef37" as const;
+  "c21a5e3a091c938576ee3bb36cba72baf0e87022" as const;
 
 export {
   TiDBLinkApiError,
@@ -145,6 +145,7 @@ export type {
   RealtimeTurnRecord,
   TemplateHandoffTurnRecord,
   TurnPage,
+  TurnState,
   TurnStatus,
   TurnUserFile,
   TurnFailure,
@@ -161,7 +162,11 @@ export type {
 } from "./history.js";
 
 export type { TurnCommandInput, RetryReceipt } from "./control.js";
-export { UserFiles, FileUploadOutcomeUnknownError } from "./files.js";
+export {
+  UserFiles,
+  FileUploadError,
+  FileUploadOutcomeUnknownError,
+} from "./files.js";
 export type {
   UserFile,
   FileUploadCapabilities,

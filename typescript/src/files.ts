@@ -1,4 +1,15 @@
-import { requestOptions, HttpClient, requireKnownKeys } from "./http.js";
+import { createHash } from "node:crypto";
+
+import {
+  requestOptions,
+  HttpClient,
+  isUnsentFailure,
+  markUnsent,
+  requireHashedLength,
+  requireKnownKeys,
+  unsentBody,
+  type BytesRequest,
+} from "./http.js";
 import {
   OutcomeUnknownError,
   TiDBLinkError,
@@ -50,6 +61,10 @@ export interface UploadFileInput extends RequestOptions {
   /** Persist with the original input before upload; reuse only for that exact file. */
   idempotencyKey: string;
   originalName: string;
+  /**
+   * The file. The SDK hashes and sends these bytes without copying them, so
+   * leave them unchanged until the upload settles.
+   */
   bytes: Uint8Array;
   contentType?: string | null;
 }
@@ -112,6 +127,29 @@ export interface UploadedFilePart {
   sha256: string;
 }
 
+/**
+ * `upload()` failed after it created the upload, in a byte transfer that sent
+ * no body bytes: fetch failed or was aborted before reading the body, or the
+ * bytes changed length after they were hashed. `cause` is the original error.
+ */
+export class FileUploadError extends TiDBLinkError {
+  constructor(
+    readonly idempotencyKey: string,
+    readonly uploadId: string,
+    cause: unknown,
+  ) {
+    super(
+      "File upload failed after the upload was created; read the upload before deciding what to repeat",
+      {
+        ...(cause instanceof TiDBLinkError && cause.requestId
+          ? { requestId: cause.requestId }
+          : {}),
+        cause,
+      },
+    );
+  }
+}
+
 export class FileUploadOutcomeUnknownError extends OutcomeUnknownError {
   constructor(
     readonly idempotencyKey: string,
@@ -127,16 +165,27 @@ export class FileUploadOutcomeUnknownError extends OutcomeUnknownError {
 
 const uploadPath = (id: string) =>
   `/drive/uploads/${encodeURIComponent(id)}`;
-const digest = async (bytes: Uint8Array) => {
-  const value = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes)),
-  );
+interface Checksum {
+  hex: string;
+  base64: string;
+  /** The number of bytes hashed. */
+  byteLength: number;
+}
+/** SHA-256 of the bytes, read in place: Web Crypto's digest would copy them first. */
+const digest = (bytes: Uint8Array): Checksum => {
+  const value = createHash("sha256").update(bytes).digest();
   return {
-    hex: Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join(
-      "",
-    ),
-    base64: btoa(String.fromCharCode(...value)),
+    hex: value.toString("hex"),
+    base64: value.toString("base64"),
+    byteLength: bytes.byteLength,
   };
+};
+const requireBytes = (bytes: unknown): void => {
+  if (!(bytes instanceof Uint8Array))
+    throw new TypeError("File bytes must be a Uint8Array");
+  // Another thread could change shared bytes between hashing and sending.
+  if (bytes.buffer instanceof SharedArrayBuffer)
+    throw new TypeError("File bytes must not be in a SharedArrayBuffer");
 };
 const fileReceipt = (
   value: { file?: UserFile },
@@ -291,24 +340,39 @@ export class UserFiles {
     ).upload;
   }
 
+  /**
+   * Send the whole file of an inline upload. The SDK hashes and sends `bytes`
+   * without copying them, so leave them unchanged until the call settles.
+   */
   async uploadContent(
     uploadId: string,
     bytes: Uint8Array,
     options?: RequestOptions,
   ): Promise<UserFile> {
     options = requestOptions(options);
-    const checksum = await digest(bytes);
+    requireBytes(bytes);
+    return this.#sendContent(uploadId, bytes, digest(bytes), options);
+  }
+
+  async #sendContent(
+    uploadId: string,
+    bytes: Uint8Array,
+    checksum: Checksum,
+    options: RequestOptions,
+  ): Promise<UserFile> {
     const { response, requestId } = await this.#http.rawResponse(
       `${uploadPath(uploadId)}/content`,
       {
         ...options,
         method: "PUT",
-        body: Uint8Array.from(bytes),
-        headers: {
-          "content-type": "application/octet-stream",
-          "content-length": String(bytes.byteLength),
-          "content-digest": `sha-256=:${checksum.base64}:`,
-        },
+        ...this.#http.bytesRequest(
+          bytes,
+          {
+            "content-type": "application/octet-stream",
+            "content-digest": `sha-256=:${checksum.base64}:`,
+          },
+          checksum.byteLength,
+        ),
         outcomeUnknown: true,
       },
     );
@@ -357,26 +421,39 @@ export class UserFiles {
     return part;
   }
 
+  /**
+   * Send one part to its presigned URL. The SDK hashes and sends `bytes`
+   * without copying them, so leave them unchanged until the call settles.
+   */
   async uploadPart(
     part: FileUploadPart,
     bytes: Uint8Array,
     options?: RequestOptions,
   ): Promise<UploadedFilePart> {
     options = requestOptions(options);
-    if (bytes.byteLength !== part.size)
+    requireBytes(bytes);
+    return this.#sendPart(part, bytes, digest(bytes), options);
+  }
+
+  async #sendPart(
+    part: FileUploadPart,
+    bytes: Uint8Array,
+    checksum: Checksum,
+    options: RequestOptions,
+  ): Promise<UploadedFilePart> {
+    if (checksum.byteLength !== part.size)
       throw new TypeError("Part bytes do not match the signed size");
-    const checksum = await digest(bytes);
     const signedChecksum = new Headers(part.headers).get(
       "x-amz-checksum-sha256",
     );
     if (signedChecksum !== checksum.base64)
       throw new TypeError("Part bytes do not match the signed checksum");
-    const response = await this.transfer(part.url, part.expiresAt, {
-      method: "PUT",
-      headers: { ...part.headers, "content-length": String(bytes.byteLength) },
-      body: Uint8Array.from(bytes),
-      ...(options?.signal ? { signal: options.signal } : {}),
-    });
+    const response = await this.transfer(
+      part.url,
+      part.expiresAt,
+      this.#http.bytesRequest(bytes, part.headers, checksum.byteLength),
+      options.signal,
+    );
     const etag = response.headers.get("etag");
     await response.body?.cancel();
     if (!etag)
@@ -386,20 +463,39 @@ export class UserFiles {
     return { number: part.number, etag, sha256: checksum.hex };
   }
 
+  /** PUT bytes to a transfer grant, which carries its own authority. */
   private async transfer(
     url: string,
     expiresAt: string,
-    init: RequestInit,
+    request: BytesRequest,
+    signal: AbortSignal | undefined,
   ): Promise<Response> {
     requireActiveGrant(expiresAt);
     const destination = transferUrl(this.#http.resolveUrl(url));
-    init.signal?.throwIfAborted();
+    signal?.throwIfAborted();
     let response: Response;
     try {
-      response = await this.#http.fetch(destination, { ...init, redirect: "error" });
-    } catch {
+      response = await this.#http.fetch(destination, {
+        method: "PUT",
+        ...request,
+        redirect: "error",
+        ...(signal ? { signal } : {}),
+      } as RequestInit);
+    } catch (cause) {
+      // The service cannot have received a transfer with no body bytes.
+      const unsent = unsentBody(request.body);
+      if (unsent instanceof Error) throw unsent;
+      if (unsent)
+        throw markUnsent(
+          signal?.aborted
+            ? cause
+            : new ConnectionError("File transfer could not be sent", {
+                cause,
+              }),
+        );
       throw new OutcomeUnknownError(
         "File transfer outcome is unknown; inspect the original upload",
+        { cause },
       );
     }
     if (!response.ok) {
@@ -456,11 +552,9 @@ export class UserFiles {
       ],
       "File upload",
     );
-    if (!(input.bytes instanceof Uint8Array))
-      throw new TypeError("File bytes must be a Uint8Array");
-    const { bytes: source, ...metadata } = input;
-    const bytes = Uint8Array.from(source);
-    const checksum = await digest(bytes);
+    requireBytes(input.bytes);
+    const { bytes, ...metadata } = input;
+    const checksum = digest(bytes);
     const options = {
       ...(input.signal ? { signal: input.signal } : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
@@ -470,12 +564,12 @@ export class UserFiles {
       const upload = await this.createUpload({
         ...metadata,
         contentType: input.contentType ?? null,
-        byteSize: bytes.byteLength,
+        byteSize: checksum.byteLength,
         sha256: checksum.hex,
       });
       uploadId = upload.uploadId;
       if (upload.file.status === "ready")
-        return requireReady(upload.file, bytes.byteLength, checksum.hex);
+        return requireReady(upload.file, checksum.byteLength, checksum.hex);
       requireActiveGrant(upload.expiresAt);
       let parts: UploadedFilePart[] | undefined;
       if (upload.mode === "tidb-link") {
@@ -489,46 +583,47 @@ export class UserFiles {
             throw new TiDBLinkError(
               "Inline upload grant does not match the complete file checksum",
             );
-          const response = await this.transfer(grant.url, grant.expiresAt, {
-            method: "PUT",
-            headers: {
-              ...grant.headers,
-              "content-length": String(bytes.byteLength),
-            },
-            body: bytes,
-            ...(input.signal ? { signal: input.signal } : {}),
-          });
+          const response = await this.transfer(
+            grant.url,
+            grant.expiresAt,
+            this.#http.bytesRequest(bytes, grant.headers, checksum.byteLength),
+            input.signal,
+          );
           await response.body?.cancel();
-        } else await this.uploadContent(uploadId, bytes, options);
+        } else await this.#sendContent(uploadId, bytes, checksum, options);
       } else {
         const { partSize, totalParts } = upload;
         if (
           !partSize ||
           !Number.isSafeInteger(partSize) ||
           !Number.isSafeInteger(totalParts) ||
-          totalParts !== Math.ceil(bytes.byteLength / partSize)
+          totalParts !== Math.ceil(checksum.byteLength / partSize)
         )
           throw new TiDBLinkError(
             "Multipart upload plan does not cover the complete file",
           );
         parts = [];
         for (let number = 1; number <= totalParts!; number++) {
+          requireHashedLength(bytes, checksum.byteLength);
           const partBytes = bytes.subarray(
             (number - 1) * partSize,
             number * partSize,
           );
+          const partChecksum = digest(partBytes);
           const part = await this.presignPart(
             uploadId,
             number,
-            (await digest(partBytes)).hex,
+            partChecksum.hex,
             options,
           );
-          parts.push(await this.uploadPart(part, partBytes, options));
+          parts.push(
+            await this.#sendPart(part, partBytes, partChecksum, options),
+          );
         }
       }
       return requireReady(
         await this.completeUpload(uploadId, parts, options),
-        bytes.byteLength,
+        checksum.byteLength,
         checksum.hex,
       );
     } catch (cause) {
@@ -538,6 +633,8 @@ export class UserFiles {
           uploadId,
           cause,
         );
+      if (uploadId !== undefined && isUnsentFailure(cause))
+        throw new FileUploadError(metadata.idempotencyKey, uploadId, cause);
       throw cause;
     }
   }
@@ -664,7 +761,7 @@ export class UserFiles {
     }
     if (
       bytes.byteLength !== grant.byteSize ||
-      (await digest(bytes)).hex !== grant.sha256
+      digest(bytes).hex !== grant.sha256
     )
       throw new TiDBLinkError(
         "Downloaded file does not match its complete size and checksum",
@@ -700,7 +797,7 @@ export class UserFiles {
     }
     if (
       content.bytes.byteLength !== file.byteSize ||
-      (await digest(content.bytes)).hex !== file.sha256
+      digest(content.bytes).hex !== file.sha256
     )
       throw new TiDBLinkError(
         "Downloaded file does not match its complete size and checksum",

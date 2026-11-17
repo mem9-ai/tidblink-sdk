@@ -87,6 +87,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       TemplateSwitchReceipt,
       TemplateSwitchStatus,
       TurnRecord,
+      TurnState,
       OperationRecord,
       Organization,
       EndUser,
@@ -176,6 +177,8 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
         sandbox: { profileId: catalog.sandboxes[0]!.id },
         realtime: { language: "en-US" },
       };
+      const silent: TemplateContent = { ...content, realtime: null };
+      void silent;
       const created: Template = await organization.templates.create({ displayName: "Ava", content, idempotencyKey: "template-1" });
       const page: TemplatePage = await organization.templates.list({ lifecycleStatus: "active" });
       // @ts-expect-error Replacement requires the ETag and an idempotency key.
@@ -331,6 +334,9 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       if (receipt.status === "pending") {
         const handoff = await session.getTurn(receipt.handoffTurnId);
         if (handoff.status !== "running") await session.refresh();
+        const state: TurnState = await session.getTurnState(receipt.handoffTurnId);
+        const stopRequestedAt: string | null = state.stopRequestedAt;
+        void stopRequestedAt;
       } else if (receipt.status === "failed") {
         console.warn(receipt.error.code);
       }

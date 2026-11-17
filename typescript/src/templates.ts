@@ -20,8 +20,11 @@ export interface TemplateContent {
   instructions?: string;
   /** A Sandbox profile from `templates.catalog()`. */
   sandbox: { profileId: string };
-  /** The language of voice conversations on Sessions created from it. */
-  realtime: { language: TemplateRealtimeLanguage };
+  /**
+   * The language of voice conversations on Sessions created from it; null
+   * turns voice off.
+   */
+  realtime: { language: TemplateRealtimeLanguage } | null;
   /** Published Skill versions from `skills` or `templates.catalog()`. */
   skills?: { skillId: string; version: number }[];
   capabilities?: { sessionRecall?: { enabled?: boolean } };
@@ -30,7 +33,10 @@ export interface TemplateContent {
    * On replace, omitting `tools` keeps the current references.
    */
   tools?: { mcp: { serverId: string }[] };
-  /** A task the voice model keeps working on across a Realtime connection. */
+  /**
+   * A task the voice model keeps working on across a Realtime connection;
+   * ignored when `realtime` is null.
+   */
   standingTask?: { goal: string };
   [field: string]: unknown;
 }

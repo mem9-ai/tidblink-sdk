@@ -13,7 +13,7 @@ text submission, steering, cancellation, checkpoint retry, original-result waiti
 continuous progress, Client Tools, Session connections over Backend Connections,
 conversation history, file attachments,
 Realtime Model/Connection preparation, prerecorded audio and User usage reads for [service revision
-4305ef67](https://github.com/mem9-ai/agent-stack/commit/4305ef67daebf23c416badf806217a7c11dcef37).
+c21a5e3a](https://github.com/mem9-ai/agent-stack/commit/c21a5e3a091c938576ee3bb36cba72baf0e87022).
 
 Text commands return durable receipts independently of execution. Waiting reads the
 original command's outcome. The service has no Agent: a Session is created
@@ -99,8 +99,8 @@ client nor a media client.
 
 After Organization Key rotation or revocation, create a new `OrganizationClient`
 with fresh valid authority and select the same User. Existing handles retain their
-old credential. New old-authority requests, subscriptions,
-Realtime tokens and Organization-issued file tickets lose authority. Accepted
+old credential. New old-authority requests, Backend Connections (closed with
+4001), Realtime tokens and Organization-issued file tickets lose authority. Accepted
 Turns continue, and admitted file transfers may finish. Reconnect/obtain new
 grants with fresh authority and reconcile the original command before submitting
 new work. Another valid Key remains usable. Disabled Users cannot start new work;
@@ -112,7 +112,9 @@ cleanup. Application policies and K3 spending policy are separate concerns.
 Pass `fetch` to route every request through your own transport, for example a
 proxy, a custom HTTP agent, instrumentation or a test double. It carries all
 requests the client makes: JSON calls, event streams, and file transfers to
-presigned storage URLs (which never receive the API Key).
+presigned storage URLs (which never receive the API Key). File uploads give it
+the caller's `Uint8Array` as the body, not the one-shot stream the default
+fetch receives; see [File attachments](#file-attachments).
 
 ```js
 const organization = new OrganizationClient({
@@ -398,7 +400,7 @@ The Handoff Turn summarizes the Session so far for the target Template. History
 reads return it as a Turn with `kind: "template_handoff"`, no `userMessage` and
 an empty `userMessages`; when it succeeds, its assistant Message is the summary.
 The service's
-[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/4305ef67daebf23c416badf806217a7c11dcef37/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
+[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/c21a5e3a091c938576ee3bb36cba72baf0e87022/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
 describes what the Session keeps across a switch (models, Billing Tag, Client
 Tools and creation options) and that cancelling the Handoff Turn fails the
 switch.
@@ -486,7 +488,7 @@ Set those five environment variables to run the installed example directly:
 `node node_modules/@tidblink/server/examples/send-message.mjs`. It prints only the
 final answer. Preserve the input across invocations; each new command identity
 can start new work. This slice replaces the obsolete response-owned NDJSON
-`streamTurn` API. Use the independent progress subscription below.
+`streamTurn` API. Follow progress over a Session connection, below.
 
 ## Progress and Session events
 
@@ -594,7 +596,11 @@ const lampTools = (deviceId: string): ClientToolHandlers => ({
   right to execute it and runs `run` only when the core grants it, so a call the
   core reports as not performed was never executed. A call that nobody claims
   within the core's claim window (5 seconds) is reported to the model as not
-  performed.
+  performed. So is a call made while no connection executes the Session: the
+  core reports it as not performed at once, never sends it, and records no
+  `requires_action` event for it; it appears only as a failed Operation step.
+  For a few seconds after a connection drops, the core may still count it as
+  executing, and such a call gets the claim window instead.
 - **Results.** A returned string is what the model receives; other values are
   sent as JSON. A thrown error becomes a failure whose message the model sees.
   A tool the connection has no handler for fails with a message saying so.
@@ -612,8 +618,9 @@ const lampTools = (deviceId: string): ClientToolHandlers => ({
 
 A result the core does not accept, for example after the call's deadline,
 reaches `onError` as a `ClientToolResultRefusedError` with the core's `reason`.
-Calls are answered only on the executing connection; the `claimBy` they carry in
-`requires_action` events marks them as such.
+Calls are executed only by the Session's executing connection; no REST command
+answers them. The `requires_action` event that records a call carries its
+`claimBy` but authorizes nothing.
 
 ### Messages and voice on a connection
 
@@ -671,6 +678,9 @@ templateId, device, store })` returns:
 - `onAppMessage(deviceId, text, { onDraft })`: a typed message; when the lamp is
   offline a temporary connection is used and the lamp's tools fail at once.
 - `onDeviceWantsToTalk(deviceId)`: sends the lamp a Realtime grant.
+
+Every TiDB Link SDK provides this example with the same behaviour and tools; see
+its [specification](https://github.com/mem9-ai/tidblink-sdk/blob/main/examples/lamp/README.md).
 
 `device` is your channel to the lamps: `isOnline(deviceId)`,
 `request(deviceId, command, args, { signal })` and `send(deviceId, topic,
@@ -811,6 +821,10 @@ Acceptance requests a stop; it does not establish termination or undo completed
 effects. Read the cancellation receipt or the original message receipt until its
 `result.status` is terminal. A completed Turn can retain success if completion won
 the race. A stale target is refused rather than cancelling its successor.
+`session.getTurnState(turnId)` returns the Turn with `stopRequestedAt`, when a
+request to stop its current execution was accepted, or null; a Turn can still be
+`running` after a stop request, so check both before acting for it. A checkpoint
+retry starts a new execution of the Turn without a stop request.
 
 Checkpoint retry deliberately starts another execution of the selected Turn:
 
@@ -936,7 +950,7 @@ reset; it is separate from `progress` and the final `assistant_message`.
 
 **The audio request owns execution's response.** Breaking its event loop, aborting
 its signal or losing the connection may request interruption. This differs from
-closing a text observation subscription. EOF alone is never reported as success.
+waiting for a text Turn, which never interrupts it. EOF alone is never reported as success.
 `AudioTurnStoppedError` preserves the Session and any already observed Turn ID;
 inspect `getTurn(turnId)` or saved history before deciding what to submit next.
 Audio accepts no `clientEventId`, has no ordinary text interaction receipt and
@@ -986,6 +1000,27 @@ cannot grant access to another User's file. File bytes remain separate from the
 message text. `capabilities()` exposes current upload limits; a typed 413 requires
 reading them again and explicitly deciding whether to create another upload.
 
+`upload()`, `uploadContent()` and `uploadPart()` hash and send the bytes you pass
+without copying them. Leave those bytes unchanged until the call settles; a
+change made meanwhile can make the sent bytes differ from their checksum, and
+bytes whose length changed after hashing are refused with a `TypeError` before
+they are sent. Bytes in a `SharedArrayBuffer` are refused, because another
+thread could change them.
+
+When you pass no `fetch` option, the request body is a stream of your array,
+sent with `duplex: "half"`, so Node.js's fetch does not copy the file either and
+a large file is held in memory once. Such a body can be sent only once, and the
+SDK never repeats a byte transfer. The stream goes to whatever
+`globalThis.fetch` is at the time, so a replacement global fetch must accept a
+streaming body with `duplex: "half"`; otherwise pass it as the `fetch` option.
+
+With a [custom `fetch`](#custom-transport), the body is your own `Uint8Array`,
+which any fetch implementation accepts and can read again; whether it copies
+the bytes is up to that fetch, and Node.js's fetch does. The body can be a view
+that starts at a non-zero `byteOffset`, as a `Buffer` often is, or a
+`subarray()` of your bytes for a multipart part: send its `byteLength` bytes
+from that offset, and never serialize or transfer its whole `buffer`.
+
 For explicit recovery use `createUpload()` with the original metadata and key,
 `getUpload(uploadId)`, `uploadContent()`, `presignPart()` / `uploadPart()`,
 `completeUpload()`, and `cancelUpload()`. Retain each returned part number, ETag
@@ -996,7 +1031,15 @@ and file. The SDK never chooses that new identity or repeats a failed transfer
 automatically.
 
 `FileUploadOutcomeUnknownError` carries `idempotencyKey` and, once creation was
-acknowledged, `uploadId`. Read that upload before deciding what to repeat. A lost
+acknowledged, `uploadId`. A byte transfer that fails before fetch reads any of
+its body, such as a refused connection or an abort, sent no body bytes, so it
+is not an unknown outcome: `uploadContent()` and `uploadPart()` throw the
+`ConnectionError`, the abort or the local error, and `upload()` throws a
+`FileUploadError` with the same `idempotencyKey` and `uploadId` and that error
+as `cause`. So do bytes whose length changed after hashing. Only the default
+fetch lets the SDK tell that nothing was sent; with a custom `fetch` such a
+failure is an unknown outcome. Read the upload before deciding what to repeat.
+A lost
 creation response can be reconciled with `createUpload()` using the exact
 original metadata and key. A pending multipart part can be signed again for its
 original digest; after an uncertain completion, read status rather than assuming
@@ -1118,7 +1161,7 @@ packed artifact in a clean ESM TypeScript consumer. To verify the packed SDK and
 its examples against the real service, use the service's Node.js 26 runtime, install its
 pinned dependencies, generate Prisma, build its Hardware contract and prepare its
 current schema in a **dedicated test database**. See the selected service's
-[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/4305ef67daebf23c416badf806217a7c11dcef37/docs/prisma-first-tidb-validation-and-rollout.md).
+[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/c21a5e3a091c938576ee3bb36cba72baf0e87022/docs/prisma-first-tidb-validation-and-rollout.md).
 
 ```sh
 AGENT_SERVICE_ROOT=/path/to/agent-stack \
@@ -1183,7 +1226,7 @@ They cover recorded input, malformed/unsupported recordings, supplier refusals,
 model failure, active-response interruption and the installed audio example.
 The public Session projection exposes the frozen Template digest but hides the
 stored creation options. Those snapshots and active-Turn model freezing also rely
-on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/4305ef67daebf23c416badf806217a7c11dcef37/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
+on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/c21a5e3a091c938576ee3bb36cba72baf0e87022/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
 prove those hidden values.
 Usage cases seed controlled facts and verify both public projections, exact filters,
 paging and authority without executing messages to manufacture billing data.

@@ -17,6 +17,51 @@ export interface RawRequestOptions extends Omit<RequestOptions, "body"> {
   headers?: Record<string, string>;
 }
 
+/** The body, headers and duplex mode that send a byte array. */
+export interface BytesRequest {
+  body: BodyInit;
+  headers: Record<string, string>;
+  duplex?: "half";
+}
+
+/**
+ * Streamed bodies from `bytesRequest()` whose bytes fetch has not read, as
+ * `"unsent"`, or the local error that stopped one before it handed any over.
+ */
+const unsentBodies = new WeakMap<object, "unsent" | Error>();
+
+/**
+ * Classify a failed send of `body`: the local error that stopped it,
+ * `"unsent"` when fetch failed before reading it, or undefined when some of it
+ * may have been sent, as with any array body. A fetch can send only the bytes
+ * it read, so an unsent body sent no body bytes and the service cannot have
+ * received the complete request, even if fetch sent its headers.
+ */
+export const unsentBody = (body: unknown): Error | "unsent" | undefined =>
+  typeof body === "object" && body !== null
+    ? unsentBodies.get(body)
+    : undefined;
+
+const unsentFailures = new WeakSet<object>();
+/** Record `error` as stopping an upload request before it sent any body bytes. */
+export const markUnsent = <T>(error: T): T => {
+  if (typeof error === "object" && error !== null) unsentFailures.add(error);
+  return error;
+};
+/** Whether `error` stopped an upload request before it sent any body bytes. */
+export const isUnsentFailure = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && unsentFailures.has(error);
+
+const changedSize = () =>
+  markUnsent(
+    new TypeError("Upload bytes changed size after they were hashed"),
+  );
+
+/** Refuse bytes that no longer have the length that was hashed. */
+export const requireHashedLength = (bytes: Uint8Array, length: number): void => {
+  if (bytes.byteLength !== length) throw changedSize();
+};
+
 interface RequestOptions {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
@@ -234,6 +279,7 @@ export class HttpClient {
   readonly #baseUrl: string;
   readonly #scope: string;
   readonly #fetch: FetchFunction;
+  readonly #customFetch: FetchFunction | undefined;
   /** The OrganizationClient's Backend Connections, shared by every scope. */
   readonly backend: BackendConnectionPool | undefined;
   /** The End User this scope selects, if any. */
@@ -252,6 +298,7 @@ export class HttpClient {
     this.#baseUrl = normalizeBaseUrl(input.baseUrl);
     this.#apiKey = input.apiKey;
     this.#scope = input.scope ?? "/api/v1/org";
+    this.#customFetch = input.fetch;
     this.#fetch = input.fetch ?? ((url, init) => fetch(url, init));
     this.backend = input.backend;
     this.userId = input.userId;
@@ -265,6 +312,45 @@ export class HttpClient {
     return this.#fetch;
   }
 
+  /**
+   * The request fields that send `bytes` without a copy by the SDK, with the
+   * `content-length` of the `length` bytes that were hashed. Node's fetch
+   * copies an array body, so with the default fetch the body is a stream of
+   * the caller's array itself, with `duplex: "half"`, which fetch can read only
+   * once: send it once and never retry it. A custom fetch receives the array
+   * itself, a body every fetch accepts and can read again; whether it copies
+   * the bytes is up to that fetch.
+   */
+  bytesRequest(
+    bytes: Uint8Array,
+    headers: Record<string, string>,
+    length: number,
+  ): BytesRequest {
+    requireHashedLength(bytes, length);
+    headers = { ...headers, "content-length": String(length) };
+    if (this.#customFetch)
+      return { body: bytes as Uint8Array<ArrayBuffer>, headers };
+    const body: ReadableStream<Uint8Array> = new ReadableStream(
+      {
+        pull(controller) {
+          if (bytes.byteLength !== length) {
+            const error = changedSize();
+            unsentBodies.set(body, error);
+            controller.error(error);
+            return;
+          }
+          unsentBodies.delete(body);
+          if (length > 0) controller.enqueue(bytes);
+          controller.close();
+        },
+      },
+      // Pull only when fetch reads, so an unread body shows it sent no bytes.
+      { highWaterMark: 0 },
+    );
+    unsentBodies.set(body, "unsent");
+    return { body, headers, duplex: "half" };
+  }
+
   forUser(userId: string): HttpClient {
     if (typeof userId !== "string" || !/^[a-z0-9_-]{1,64}$/.test(userId))
       throw new TypeError(
@@ -274,7 +360,7 @@ export class HttpClient {
       baseUrl: this.#baseUrl,
       apiKey: this.#apiKey,
       scope: `${this.#scope}/users/${encodeURIComponent(userId)}`,
-      fetch: this.#fetch,
+      fetch: this.#customFetch,
       backend: this.backend,
       userId,
     });
@@ -406,6 +492,8 @@ export class HttpClient {
         "idempotencyKey must be 1-255 visible ASCII characters",
       );
     }
+    if (options.retry === "safe" && options.body instanceof ReadableStream)
+      throw new TypeError("A streamed request body cannot be retried");
     options.signal?.throwIfAborted();
     const attempts = options.retry === "safe" ? MAX_ATTEMPTS : 1;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -425,10 +513,17 @@ export class HttpClient {
             ...(options.ifMatch ? { "if-match": options.ifMatch } : {}),
           },
           ...(options.body === undefined ? {} : { body: options.body }),
+          // Fetch requires it to send a stream.
+          ...(options.body instanceof ReadableStream ? { duplex: "half" } : {}),
           ...(options.signal ? { signal: options.signal } : {}),
-        });
+        } as RequestInit);
       } catch (cause) {
-        if (options.signal?.aborted && !options.outcomeUnknown) throw cause;
+        const unsent = unsentBody(options.body);
+        if (unsent instanceof Error) throw unsent;
+        // The service cannot have received a request with no body bytes.
+        const outcomeUnknown = options.outcomeUnknown && !unsent;
+        if (options.signal?.aborted && !outcomeUnknown)
+          throw unsent ? markUnsent(cause) : cause;
         if (attempt < attempts && !options.signal?.aborted) {
           await pauseBeforeRetry(
             100 * 2 ** (attempt - 1),
@@ -437,11 +532,11 @@ export class HttpClient {
           );
           continue;
         }
-        const ErrorClass = options.outcomeUnknown
+        const ErrorClass = outcomeUnknown
           ? OutcomeUnknownError
           : ConnectionError;
-        throw new ErrorClass(
-          options.outcomeUnknown
+        const error = new ErrorClass(
+          outcomeUnknown
             ? "TiDB Link request outcome is unknown; do not repeat it automatically"
             : "Could not reach TiDB Link",
           {
@@ -449,6 +544,7 @@ export class HttpClient {
             cause,
           },
         );
+        throw unsent ? markUnsent(error) : error;
       }
 
       if (response.ok)

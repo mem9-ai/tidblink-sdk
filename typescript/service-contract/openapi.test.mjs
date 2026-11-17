@@ -231,6 +231,17 @@ test("cancel and checkpoint retry keep exact command identities and distinct rec
     );
 });
 
+test("a Turn read reports when a stop was requested", () => {
+  const read = schema("TurnResponse");
+  assert.deepEqual(read.required, ["turn", "stopRequestedAt"]);
+  assert.equal(read.properties.stopRequestedAt.type, "string");
+  assert.equal(read.properties.stopRequestedAt.nullable, true);
+  const answer =
+    document.paths[`${sessionPath}/turns/{turnId}`].get.responses["200"]
+      .content["application/json"].schema;
+  assert.equal(answer.$ref, "#/components/schemas/TurnResponse");
+});
+
 test("target-User usage preserves Organization authority, exact ranges and its result projection", () => {
   const org = document.paths["/api/v1/org/users/{userId}/billing/usage"].get;
   const orgDetails =
@@ -438,8 +449,11 @@ test("the core Agent is gone from the selected contract", () => {
   }
 });
 
-test("the Session event stream documents agent.session.idle as the release before the next Turn", () => {
-  const text = JSON.stringify(document.paths[`${sessionPath}/events`].get).replace(/\\n|\s+/g, " ");
-  assert.match(text, /agent\.session\.idle/);
-  assert.match(text, /Wait for it before submitting the next message, audio Turn or Template switch/);
+test("the per-Session subscription and REST Client Tool answers are gone", () => {
+  // Session events, including agent.session.idle, reach only Backend Connections.
+  assert.equal(document.paths[`${sessionPath}/events`].get, undefined);
+  const commands = JSON.stringify(
+    document.components.schemas.SessionEventOpenApiDto,
+  );
+  assert.doesNotMatch(commands, /agent\.session\.input\.client_tool_output/);
 });
