@@ -465,3 +465,59 @@ test("download checks complete content and keeps expired grants unusable", async
   );
   assert.equal(requests, 1);
 });
+
+test("inline content and parts send the caller's bytes as they are, without a copy", async () => {
+  const sent = [];
+  const fetch = async (input, init) => {
+    const url = String(input);
+    if (init.body instanceof ReadableStream) {
+      const reader = init.body.getReader();
+      const chunks = [];
+      for (let next = await reader.read(); !next.done; next = await reader.read())
+        chunks.push(next.value);
+      sent.push({ url, init, chunks });
+    }
+    if (url.endsWith("/content"))
+      return Response.json({ file: ready("inline-copy") });
+    return new Response(null, { status: 200, headers: { etag: '"p1"' } });
+  };
+  const user = new OrganizationClient({
+    baseUrl: "https://core.example",
+    apiKey,
+    fetch,
+  }).user("user_1");
+  const content = new TextEncoder().encode("abc");
+  await user.files.uploadContent("inline-copy", content);
+  const part = new TextEncoder().encode("ab");
+  await user.files.uploadPart(
+    {
+      number: 1,
+      size: 2,
+      url: "https://storage.example/part",
+      headers: {
+        "x-amz-checksum-sha256": Buffer.from(
+          "fb8e20fc2e4c3f248c60c39bd652f3c1347298bb977b8b4d5903b85055620603",
+          "hex",
+        ).toString("base64"),
+      },
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    },
+    part,
+  );
+  assert.equal(sent.length, 2);
+  for (const [request, bytes] of [
+    [sent[0], content],
+    [sent[1], part],
+  ]) {
+    // The one chunk is the caller's own array: the SDK neither copied nor detached it.
+    assert.equal(request.chunks.length, 1);
+    assert.equal(request.chunks[0], bytes);
+    assert.equal(bytes.byteLength, request.init.headers["content-length"] * 1);
+    assert.equal(request.init.duplex, "half");
+  }
+  assert.equal(
+    sent[0].init.headers["content-digest"],
+    "sha-256=:ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=:",
+  );
+  assert.equal(new TextDecoder().decode(content), "abc");
+});

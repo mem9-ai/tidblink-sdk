@@ -17,6 +17,19 @@ export interface RawRequestOptions extends Omit<RequestOptions, "body"> {
   headers?: Record<string, string>;
 }
 
+/**
+ * A request body that streams `bytes` as they are, without the copy fetch
+ * makes of an array body. Send it with `duplex: "half"` and an explicit
+ * `content-length`, and only once: a stream cannot be sent again.
+ */
+export const bytesBody = (bytes: Uint8Array): ReadableStream<Uint8Array> =>
+  new ReadableStream({
+    start(controller) {
+      if (bytes.byteLength > 0) controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+
 interface RequestOptions {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
@@ -407,7 +420,11 @@ export class HttpClient {
       );
     }
     options.signal?.throwIfAborted();
-    const attempts = options.retry === "safe" ? MAX_ATTEMPTS : 1;
+    // A streamed body can be sent only once.
+    const attempts =
+      options.retry === "safe" && !(options.body instanceof ReadableStream)
+        ? MAX_ATTEMPTS
+        : 1;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       let response: Response;
       try {
@@ -425,8 +442,9 @@ export class HttpClient {
             ...(options.ifMatch ? { "if-match": options.ifMatch } : {}),
           },
           ...(options.body === undefined ? {} : { body: options.body }),
+          ...(options.body instanceof ReadableStream ? { duplex: "half" } : {}),
           ...(options.signal ? { signal: options.signal } : {}),
-        });
+        } as RequestInit);
       } catch (cause) {
         if (options.signal?.aborted && !options.outcomeUnknown) throw cause;
         if (attempt < attempts && !options.signal?.aborted) {

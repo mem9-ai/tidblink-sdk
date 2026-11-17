@@ -990,6 +990,11 @@ cannot grant access to another User's file. File bytes remain separate from the
 message text. `capabilities()` exposes current upload limits; a typed 413 requires
 reading them again and explicitly deciding whether to create another upload.
 
+`upload()`, `uploadContent()` and `uploadPart()` hash and send the bytes you pass
+without copying them, so a large file is held in memory once. Leave those bytes
+unchanged until the call settles; a change made meanwhile can make the sent
+bytes differ from their checksum.
+
 For explicit recovery use `createUpload()` with the original metadata and key,
 `getUpload(uploadId)`, `uploadContent()`, `presignPart()` / `uploadPart()`,
 `completeUpload()`, and `cancelUpload()`. Retain each returned part number, ETag

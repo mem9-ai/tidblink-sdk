@@ -1,4 +1,11 @@
-import { requestOptions, HttpClient, requireKnownKeys } from "./http.js";
+import { createHash } from "node:crypto";
+
+import {
+  bytesBody,
+  requestOptions,
+  HttpClient,
+  requireKnownKeys,
+} from "./http.js";
 import {
   OutcomeUnknownError,
   TiDBLinkError,
@@ -50,6 +57,10 @@ export interface UploadFileInput extends RequestOptions {
   /** Persist with the original input before upload; reuse only for that exact file. */
   idempotencyKey: string;
   originalName: string;
+  /**
+   * The file. The SDK hashes and sends these bytes without copying them, so
+   * leave them unchanged until the upload settles.
+   */
   bytes: Uint8Array;
   contentType?: string | null;
 }
@@ -127,10 +138,9 @@ export class FileUploadOutcomeUnknownError extends OutcomeUnknownError {
 
 const uploadPath = (id: string) =>
   `/drive/uploads/${encodeURIComponent(id)}`;
-const digest = async (bytes: Uint8Array) => {
-  const value = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes)),
-  );
+/** SHA-256 of the bytes, read in place: Web Crypto's digest would copy them first. */
+const digest = (bytes: Uint8Array) => {
+  const value = createHash("sha256").update(bytes).digest();
   return {
     hex: Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join(
       "",
@@ -291,19 +301,23 @@ export class UserFiles {
     ).upload;
   }
 
+  /**
+   * Send the whole file of an inline upload. The SDK hashes and sends `bytes`
+   * without copying them, so leave them unchanged until the call settles.
+   */
   async uploadContent(
     uploadId: string,
     bytes: Uint8Array,
     options?: RequestOptions,
   ): Promise<UserFile> {
     options = requestOptions(options);
-    const checksum = await digest(bytes);
+    const checksum = digest(bytes);
     const { response, requestId } = await this.#http.rawResponse(
       `${uploadPath(uploadId)}/content`,
       {
         ...options,
         method: "PUT",
-        body: Uint8Array.from(bytes),
+        body: bytesBody(bytes),
         headers: {
           "content-type": "application/octet-stream",
           "content-length": String(bytes.byteLength),
@@ -357,6 +371,10 @@ export class UserFiles {
     return part;
   }
 
+  /**
+   * Send one part to its presigned URL. The SDK hashes and sends `bytes`
+   * without copying them, so leave them unchanged until the call settles.
+   */
   async uploadPart(
     part: FileUploadPart,
     bytes: Uint8Array,
@@ -365,7 +383,7 @@ export class UserFiles {
     options = requestOptions(options);
     if (bytes.byteLength !== part.size)
       throw new TypeError("Part bytes do not match the signed size");
-    const checksum = await digest(bytes);
+    const checksum = digest(bytes);
     const signedChecksum = new Headers(part.headers).get(
       "x-amz-checksum-sha256",
     );
@@ -374,7 +392,8 @@ export class UserFiles {
     const response = await this.transfer(part.url, part.expiresAt, {
       method: "PUT",
       headers: { ...part.headers, "content-length": String(bytes.byteLength) },
-      body: Uint8Array.from(bytes),
+      body: bytesBody(bytes),
+      duplex: "half",
       ...(options?.signal ? { signal: options.signal } : {}),
     });
     const etag = response.headers.get("etag");
@@ -389,7 +408,7 @@ export class UserFiles {
   private async transfer(
     url: string,
     expiresAt: string,
-    init: RequestInit,
+    init: RequestInit & { duplex?: "half" },
   ): Promise<Response> {
     requireActiveGrant(expiresAt);
     const destination = transferUrl(this.#http.resolveUrl(url));
@@ -458,9 +477,8 @@ export class UserFiles {
     );
     if (!(input.bytes instanceof Uint8Array))
       throw new TypeError("File bytes must be a Uint8Array");
-    const { bytes: source, ...metadata } = input;
-    const bytes = Uint8Array.from(source);
-    const checksum = await digest(bytes);
+    const { bytes, ...metadata } = input;
+    const checksum = digest(bytes);
     const options = {
       ...(input.signal ? { signal: input.signal } : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
@@ -495,7 +513,8 @@ export class UserFiles {
               ...grant.headers,
               "content-length": String(bytes.byteLength),
             },
-            body: bytes,
+            body: bytesBody(bytes),
+            duplex: "half",
             ...(input.signal ? { signal: input.signal } : {}),
           });
           await response.body?.cancel();
@@ -520,7 +539,7 @@ export class UserFiles {
           const part = await this.presignPart(
             uploadId,
             number,
-            (await digest(partBytes)).hex,
+            digest(partBytes).hex,
             options,
           );
           parts.push(await this.uploadPart(part, partBytes, options));

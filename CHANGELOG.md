@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `files.upload()`, `uploadContent()` and `uploadPart()` hash and send the
+  caller's bytes in place instead of copying them: the SDK and Node.js fetch
+  used to hold about three more copies of a file while it uploaded. Leave the
+  bytes unchanged until the call settles. The SDK now hashes with
+  `node:crypto`, because Web Crypto's digest also copies its input.
+
 - Add `session.getTurnState(turnId)`, which returns the Turn with
   `stopRequestedAt`: when a request to stop its current execution was
   accepted, or null. A Turn can still be running after a stop request;
