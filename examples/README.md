@@ -10,7 +10,7 @@ languages.
 
 | Scenario | What it shows | TypeScript | Python |
 |---|---|---|---|
-| [Smart lamp](lamp/README.md) | One Session per device, shared by typed messages and voice; device functions as Client Tools; Realtime grants for the device | [lamp-backend.mjs](../typescript/examples/lamp-backend.mjs) | [lamp_backend.py](../python/examples/lamp_backend.py) |
+| [Smart lamp](lamp/README.md) | One Session per device, shared by typed messages and voice; device functions as Client Tools; Realtime grants for the device; a Template per device model, switched when the model changes | [lamp-backend.mjs](../typescript/examples/lamp-backend.mjs) | [lamp_backend.py](../python/examples/lamp_backend.py) |
 | Create a Session | Create a Session from a Template with an idempotent creation key | [create-session.mjs](../typescript/examples/create-session.mjs) | [create_session.py](../python/examples/create_session.py) |
 | Send a message | Submit text and wait for the result; recover with the same command identity | [send-message.mjs](../typescript/examples/send-message.mjs) | [send_message.py](../python/examples/send_message.py) |
 | Control a Turn | Cancel or retry a Turn from its checkpoint | [control-turn.mjs](../typescript/examples/control-turn.mjs) | [control_turn.py](../python/examples/control_turn.py) |

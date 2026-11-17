@@ -8,7 +8,7 @@ language.
 | Language | Implementation | Tests |
 |---|---|---|
 | TypeScript | [lamp-backend.mjs](../../typescript/examples/lamp-backend.mjs) | [lamp-example.test.mjs](../../typescript/test/lamp-example.test.mjs), [real service](../../typescript/test/service/backend-connection.cases.mjs) |
-| Python | [lamp_backend.py](../../python/examples/lamp_backend.py) | [test_lamp_example.py](../../python/tests/test_lamp_example.py); the real-service test (4) is not yet written |
+| Python | [lamp_backend.py](../../python/examples/lamp_backend.py) | [test_lamp_example.py](../../python/tests/test_lamp_example.py); the real-service test (5) is not yet written |
 
 The TypeScript implementation is the reference. If this specification and the
 reference disagree, fix one of them in the same change.
@@ -35,6 +35,11 @@ reference disagree, fix one of them in the same change.
   opens the Realtime WebSocket itself; audio never passes through the backend.
 - Cloud capabilities, such as a warranty lookup, belong in a Connector that the
   Template references, not in the lamp's tools.
+- Each lamp model has its own Template, so a model's personality, instructions
+  and Connectors are configured apart from the others. One Organization API Key
+  uses any number of the Organization's Templates. A lamp's Session starts on
+  its model's Template and switches Template when the lamp changes model, for
+  example after an upgrade, keeping its conversation history.
 
 ## Inputs
 
@@ -43,7 +48,7 @@ Construction takes the following, named in the language's own style:
 | Input | Meaning |
 |---|---|
 | `baseUrl`, `organizationApiKey` | Create one Organization client, which owns the Backend Connections. |
-| `templateId` | The Template of every lamp Session. |
+| `templates` | The Template ID of each lamp model, such as `{ standard, pro }`. |
 | `device` | The channel to the lamps, provided by the application (see below). |
 | `store` | Lamp bindings and event cursors. Optional; defaults to an in-memory store. |
 | `onChat(deviceId, { role, text })` | Optional. Receives voice transcripts (`role: "user"`) and voice responses (`role: "assistant"`) so they also appear in the app. |
@@ -66,7 +71,8 @@ Construction takes the following, named in the language's own style:
 
 | Operation | Behaviour |
 |---|---|
-| `bindDevice(appUserId, deviceId) -> sessionId` | Create the End User with `externalId = appUserId`. This is safe to repeat. Create the lamp's Session from `templateId` with idempotency key `lamp.{deviceId}`, so a retry returns the same Session. Store the binding. |
+| `bindDevice(appUserId, deviceId, model) -> sessionId` | A model that is not in `templates` fails with `Unknown lamp model {model}` before any request. Create the End User with `externalId = appUserId`. This is safe to repeat. Create the lamp's Session from `templates[model]` with idempotency key `lamp.{deviceId}`, so a retry returns the same Session. Binding the lamp again with another model is refused, because the key is the same and the input is not; use `changeModel` instead. Store the binding. |
+| `changeModel(deviceId, model, { changeId? }) -> receipt` | A model that is not in `templates` fails with `Unknown lamp model {model}` before any request. Switch the lamp's Session to `templates[model]` with idempotency key `lamp.{deviceId}.{changeId}` and return the switch receipt. `changeId` defaults to a new random ID; pass the same one to recover a lost response. The Session keeps its history: when it has some, the receipt is `pending` while a Handoff Turn runs under the new Template. The lamp's connection and tools stay as they are. A lamp without a binding fails with `Lamp {deviceId} is not bound to a user`. The service refuses the switch while a Turn runs or the lamp is talking. |
 | `onDeviceOnline(deviceId)` | If the lamp is already connected here, do nothing. Otherwise connect its Session with the lamp's tools, starting from the stored cursor, saving each new cursor and forwarding voice transcripts and responses to `onChat`. When the connection ends on its own, for example because another process took the lamp over, forget it. A lamp without a binding fails with `Lamp {deviceId} is not bound to a user`. |
 | `onDeviceOffline(deviceId)` | Forget the lamp's connection and close it. |
 | `onAppMessage(deviceId, text, { clientEventId?, onDraft? }) -> text` | Send the message over the lamp's connection. If the lamp is not connected, use a temporary connection and close it afterwards. Report each growing draft to `onDraft`. Return the final answer's text. |
@@ -125,5 +131,10 @@ Every implementation has tests for these cases, matching the TypeScript tests:
    online, the lamp receives the grant on `voice_grant`.
 3. A lamp whose connection another process took over is no longer online here.
    Bringing an unbound lamp online fails.
-4. Against the real service: bind a lamp, answer a typed message while offline
-   and while online with drafts, hand out a voice grant, and go offline.
+4. Binding creates the lamp's Session from its model's Template with key
+   `lamp.{deviceId}` and stores the binding. Changing the model switches the
+   Session to that model's Template with key `lamp.{deviceId}.{changeId}` and
+   returns the receipt. An unknown model fails before any request.
+5. Against the real service: bind a lamp, answer a typed message while offline
+   and while online with drafts, hand out a voice grant, go offline, and change
+   the lamp's model.

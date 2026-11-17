@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import {
   BackendRequestError,
+  ConflictError,
   OrganizationClient,
   TurnFailedError,
   TurnInterruptedError,
@@ -191,22 +192,25 @@ test("realtimeGrant() prepares the Session's Realtime connection, then reissues 
   }
 });
 
-test("the packaged lamp backend binds a lamp, answers typed messages and hands the lamp a voice grant", async () => {
-  const { createLampBackend } = await import("@tidblink/server/examples/lamp-backend.mjs");
+test("the packaged lamp backend binds a lamp, answers typed messages, hands the lamp a voice grant and changes its model", async () => {
+  const { createLampBackend, memoryStore } = await import("@tidblink/server/examples/lamp-backend.mjs");
   const sent = [];
+  const store = memoryStore();
   const lamps = createLampBackend({
     baseUrl,
     organizationApiKey: apiKey,
-    templateId: process.env.SDK_TEMPLATE_ID,
+    templates: { standard: process.env.SDK_TEMPLATE_ID, pro: process.env.SDK_OTHER_TEMPLATE_ID },
     device: {
       isOnline: () => true,
       request: async () => ({ on: true, brightness: 40, colorTemp: 4000 }),
       send: (deviceId, topic, payload) => sent.push([deviceId, topic, payload]),
     },
+    store,
   });
   try {
     const deviceId = `lamp-${randomUUID()}`;
-    const sessionId = await lamps.bindDevice(`app-user-${randomUUID()}`, deviceId);
+    const appUserId = `app-user-${randomUUID()}`;
+    const sessionId = await lamps.bindDevice(appUserId, deviceId, "standard");
     assert.match(sessionId, /^sess_/u);
     // Offline: a temporary connection carries the message.
     assert.equal(await lamps.onAppMessage(deviceId, "SDK_FIXTURE offline question"), "SDK final answer.");
@@ -220,6 +224,26 @@ test("the packaged lamp backend binds a lamp, answers typed messages and hands t
     assert.match(grant.connectToken, /^rct_/u);
     assert.deepEqual(sent, [[deviceId, "voice_grant", grant]]);
     await lamps.onDeviceOffline(deviceId);
+    // Binding again with another model is refused: the lamp keeps its one Session.
+    await assert.rejects(
+      lamps.bindDevice(appUserId, deviceId, "pro"),
+      (error) => error instanceof ConflictError && error.code === "session_creation_conflict",
+    );
+    // A model change waits until the lamp hung up voice and the last Turn was released.
+    const { userId } = await store.binding(deviceId);
+    const session = lamps.organization.user(userId).session(sessionId);
+    await session.endRealtimeConnection();
+    await until(async () => {
+      await session.refresh();
+      return session.data.activeTurnId === null;
+    });
+    // The Session has history, so a Handoff Turn moves it to the new Template.
+    const change = { changeId: randomUUID() };
+    const receipt = await lamps.changeModel(deviceId, "pro", change);
+    assert.equal(receipt.sessionId, sessionId);
+    assert.equal(receipt.agentTemplateId, process.env.SDK_OTHER_TEMPLATE_ID);
+    assert.equal(receipt.status, "pending");
+    assert.deepEqual(await lamps.changeModel(deviceId, "pro", change), receipt);
   } finally {
     await lamps.close();
   }
