@@ -17,8 +17,8 @@ Python.
 
 ## Supported scope
 
-Organization information, End User provisioning, Template, Skill and Connector
-management, Connector callback verification, Template/model discovery, Session
+Organization information, End User provisioning, Template and Skill
+management, Connector reads, Template/model discovery, Session
 management and Template switches, text submission, steering, cancellation,
 checkpoint retry, original-result waiting, Client Tools, Session connections
 over Backend Connections with progress and events, conversation history, file
@@ -32,8 +32,7 @@ explicitly selected End User.
 pip install "git+https://github.com/mem9-ai/tidblink-sdk.git#subdirectory=python"
 ```
 
-Runtime dependencies: `httpx` (HTTP), `websockets` (Backend Connections) and
-`cryptography` (Ed25519 verification of Connector callbacks).
+Runtime dependencies: `httpx` (HTTP) and `websockets` (Backend Connections).
 
 ## Quick start
 
@@ -215,12 +214,15 @@ request interruption of the Turn, as breaking the loop does in TypeScript.
 catalog = await organization.templates.catalog()
 created = await organization.templates.create(display_name="Support assistant", content=content, idempotency_key=key)
 upload = await organization.skills.upload(data=zip_bytes, idempotency_key=upload_key)
-connector = await organization.connectors.register(display_name="Orders", endpoint_url="https://orders.example.com/mcp")
-
-keys = ConnectorKeySet(base_url)
-claims = await verify_connector_callback(authorization, keys=keys, organization_id=org_id, connector_id=connector_id)
-context = read_connector_call_context(message["params"]["_meta"], organization_id=org_id)
+connectors = await organization.connectors.list()
 ```
+
+Connectors are moving onto the Backend Connection, where serving a Connector
+registers it, and the HTTP callback route is going away. So unlike the
+TypeScript SDK 0.4, this SDK only lists and reads Connectors
+(`connectors.list()`, `connectors.get(connector_id)`): it has no Connector
+registration, activation or callback verification, and no HTTP Connector
+example.
 
 ## Examples
 
