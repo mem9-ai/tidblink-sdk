@@ -8,6 +8,7 @@ language.
 | Language | Implementation | Tests |
 |---|---|---|
 | TypeScript | [lamp-backend.mjs](../../typescript/examples/lamp-backend.mjs) | [lamp-example.test.mjs](../../typescript/test/lamp-example.test.mjs), [real service](../../typescript/test/service/backend-connection.cases.mjs) |
+| Python | [lamp_backend.py](../../python/examples/lamp_backend.py) | [test_lamp_example.py](../../python/tests/test_lamp_example.py); the real-service test (4) is not yet written |
 
 The TypeScript implementation is the reference. If this specification and the
 reference disagree, fix one of them in the same change.

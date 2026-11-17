@@ -30,3 +30,27 @@ jobs:
         run: node scripts/release-plan.mjs
         env:
           GH_TOKEN: ${{ github.token }}
+
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - name: Build the wheel and import it in a clean environment
+        run: |
+          python -m pip install build
+          python -m build --outdir dist
+          python -m venv /tmp/consumer
+          /tmp/consumer/bin/pip install dist/*.whl
+          cd /tmp && /tmp/consumer/bin/python -c "import tidblink_server; print(tidblink_server.TIDB_LINK_REVISION)"
