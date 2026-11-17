@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { after, test } from "node:test";
 import { createLampBackend, memoryStore } from "../examples/lamp-backend.mjs";
 import { backendServer } from "./support/backend-server.mjs";
+
+/** The lamp's tools every SDK's lamp example declares: examples/lamp/tools.json. */
+const lampToolDeclarations = JSON.parse(
+  await readFile(new URL("../../examples/lamp/tools.json", import.meta.url), "utf8"),
+);
 
 const apiKey = "ti_org_lamp_" + "x".repeat(43);
 const servers = [];
@@ -208,7 +214,7 @@ test("an online lamp's Session declares the lamp's tools and forwards their call
   const peer = server.peers[0];
   const attach = methodOf(peer, "session.attach")[0].params;
   assert.equal(attach.cursor, "7");
-  assert.deepEqual(attach.tools.map((tool) => tool.name), ["set_light", "get_status", "set_timer"]);
+  assert.deepEqual(attach.tools, lampToolDeclarations);
   peer.send(toolCall("call_1", "set_light", { brightness: 40 }));
   await until(() => methodOf(peer, "tool.result").length === 1);
   assert.deepEqual(device.requests, [["lamp-1", "set_light", { brightness: 40 }]]);

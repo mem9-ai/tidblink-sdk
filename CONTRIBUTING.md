@@ -43,3 +43,12 @@ of `CHANGELOG.md`. Releases follow [RELEASING.md](RELEASING.md).
 
 Open an issue before adding a new product area. The SDK intentionally exposes a
 narrow supported surface rather than every TiDB Link route.
+
+## Examples
+
+Each SDK keeps its examples in `{language}/examples/`, covered by its tests;
+[`examples/README.md`](examples/README.md) indexes them by scenario. A new SDK
+includes the [smart lamp example](examples/lamp/README.md), which declares the
+Client Tools in [`examples/lamp/tools.json`](examples/lamp/tools.json) and has
+the tests that specification lists. A change to the lamp's behaviour or tools
+updates the specification, `tools.json` and every SDK's lamp example together.
