@@ -162,7 +162,11 @@ export type {
 } from "./history.js";
 
 export type { TurnCommandInput, RetryReceipt } from "./control.js";
-export { UserFiles, FileUploadOutcomeUnknownError } from "./files.js";
+export {
+  UserFiles,
+  FileUploadError,
+  FileUploadOutcomeUnknownError,
+} from "./files.js";
 export type {
   UserFile,
   FileUploadCapabilities,

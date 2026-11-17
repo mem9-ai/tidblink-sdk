@@ -16,13 +16,19 @@
   still receives the caller's `Uint8Array` as the body, which wrappers that
   rebuild or read the request, and fetch implementations such as node-fetch,
   can handle; whether it copies the bytes is up to that fetch.
-- An upload byte transfer that failed before any of its body was sent, such as
-  a refused connection or bytes that changed size before they were read, now
-  fails with `ConnectionError` or the local error instead of
-  `OutcomeUnknownError` (`FileUploadOutcomeUnknownError` from `upload()`):
-  the service cannot have received it.
+- With the default fetch, an upload byte transfer that failed before fetch
+  read any of its body, such as a refused connection or an abort, now fails
+  with `ConnectionError`, the abort or the local error instead of
+  `OutcomeUnknownError`: it sent no body bytes, so the service cannot have
+  received it. `upload()` reports such a failure, and bytes whose length
+  changed after hashing, as a new `FileUploadError` that carries `uploadId`,
+  `idempotencyKey` and the original error as `cause`, instead of
+  `FileUploadOutcomeUnknownError`. With a custom `fetch` the SDK cannot tell
+  what was sent, so such a failure is still an unknown outcome.
 - `uploadContent()` and `uploadPart()` reject bytes that are not a
-  `Uint8Array` with a `TypeError`, as `upload()` already did.
+  `Uint8Array` with a `TypeError`, as `upload()` already did. All three reject
+  bytes in a `SharedArrayBuffer`, and bytes whose length changed after they
+  were hashed, with a `TypeError` before sending them.
 - Add `session.getTurnState(turnId)`, which returns the Turn with
   `stopRequestedAt`: when a request to stop its current execution was
   accepted, or null. A Turn can still be running after a stop request;

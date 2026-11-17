@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import {
   requestOptions,
   HttpClient,
+  isUnsentFailure,
+  markUnsent,
+  requireHashedLength,
   requireKnownKeys,
   unsentBody,
   type BytesRequest,
@@ -124,6 +127,29 @@ export interface UploadedFilePart {
   sha256: string;
 }
 
+/**
+ * `upload()` failed after it created the upload, in a byte transfer that sent
+ * no body bytes: fetch failed or was aborted before reading the body, or the
+ * bytes changed length after they were hashed. `cause` is the original error.
+ */
+export class FileUploadError extends TiDBLinkError {
+  constructor(
+    readonly idempotencyKey: string,
+    readonly uploadId: string,
+    cause: unknown,
+  ) {
+    super(
+      "File upload failed after the upload was created; read the upload before deciding what to repeat",
+      {
+        ...(cause instanceof TiDBLinkError && cause.requestId
+          ? { requestId: cause.requestId }
+          : {}),
+        cause,
+      },
+    );
+  }
+}
+
 export class FileUploadOutcomeUnknownError extends OutcomeUnknownError {
   constructor(
     readonly idempotencyKey: string,
@@ -142,15 +168,24 @@ const uploadPath = (id: string) =>
 interface Checksum {
   hex: string;
   base64: string;
+  /** The number of bytes hashed. */
+  byteLength: number;
 }
 /** SHA-256 of the bytes, read in place: Web Crypto's digest would copy them first. */
 const digest = (bytes: Uint8Array): Checksum => {
   const value = createHash("sha256").update(bytes).digest();
-  return { hex: value.toString("hex"), base64: value.toString("base64") };
+  return {
+    hex: value.toString("hex"),
+    base64: value.toString("base64"),
+    byteLength: bytes.byteLength,
+  };
 };
 const requireBytes = (bytes: unknown): void => {
   if (!(bytes instanceof Uint8Array))
     throw new TypeError("File bytes must be a Uint8Array");
+  // Another thread could change shared bytes between hashing and sending.
+  if (bytes.buffer instanceof SharedArrayBuffer)
+    throw new TypeError("File bytes must not be in a SharedArrayBuffer");
 };
 const fileReceipt = (
   value: { file?: UserFile },
@@ -330,10 +365,14 @@ export class UserFiles {
       {
         ...options,
         method: "PUT",
-        ...this.#http.bytesRequest(bytes, {
-          "content-type": "application/octet-stream",
-          "content-digest": `sha-256=:${checksum.base64}:`,
-        }),
+        ...this.#http.bytesRequest(
+          bytes,
+          {
+            "content-type": "application/octet-stream",
+            "content-digest": `sha-256=:${checksum.base64}:`,
+          },
+          checksum.byteLength,
+        ),
         outcomeUnknown: true,
       },
     );
@@ -402,7 +441,7 @@ export class UserFiles {
     checksum: Checksum,
     options: RequestOptions,
   ): Promise<UploadedFilePart> {
-    if (bytes.byteLength !== part.size)
+    if (checksum.byteLength !== part.size)
       throw new TypeError("Part bytes do not match the signed size");
     const signedChecksum = new Headers(part.headers).get(
       "x-amz-checksum-sha256",
@@ -412,7 +451,7 @@ export class UserFiles {
     const response = await this.transfer(
       part.url,
       part.expiresAt,
-      this.#http.bytesRequest(bytes, part.headers),
+      this.#http.bytesRequest(bytes, part.headers, checksum.byteLength),
       options.signal,
     );
     const etag = response.headers.get("etag");
@@ -433,8 +472,6 @@ export class UserFiles {
   ): Promise<Response> {
     requireActiveGrant(expiresAt);
     const destination = transferUrl(this.#http.resolveUrl(url));
-    // Invalid grant headers are a local error, not an unknown outcome.
-    new Headers(request.headers);
     signal?.throwIfAborted();
     let response: Response;
     try {
@@ -445,14 +482,17 @@ export class UserFiles {
         ...(signal ? { signal } : {}),
       } as RequestInit);
     } catch (cause) {
-      // A body fetch never read left nothing the service could accept.
+      // The service cannot have received a transfer with no body bytes.
       const unsent = unsentBody(request.body);
       if (unsent instanceof Error) throw unsent;
-      if (unsent && signal?.aborted) throw cause;
       if (unsent)
-        throw new ConnectionError("File transfer could not be sent", {
-          cause,
-        });
+        throw markUnsent(
+          signal?.aborted
+            ? cause
+            : new ConnectionError("File transfer could not be sent", {
+                cause,
+              }),
+        );
       throw new OutcomeUnknownError(
         "File transfer outcome is unknown; inspect the original upload",
         { cause },
@@ -524,12 +564,12 @@ export class UserFiles {
       const upload = await this.createUpload({
         ...metadata,
         contentType: input.contentType ?? null,
-        byteSize: bytes.byteLength,
+        byteSize: checksum.byteLength,
         sha256: checksum.hex,
       });
       uploadId = upload.uploadId;
       if (upload.file.status === "ready")
-        return requireReady(upload.file, bytes.byteLength, checksum.hex);
+        return requireReady(upload.file, checksum.byteLength, checksum.hex);
       requireActiveGrant(upload.expiresAt);
       let parts: UploadedFilePart[] | undefined;
       if (upload.mode === "tidb-link") {
@@ -546,7 +586,7 @@ export class UserFiles {
           const response = await this.transfer(
             grant.url,
             grant.expiresAt,
-            this.#http.bytesRequest(bytes, grant.headers),
+            this.#http.bytesRequest(bytes, grant.headers, checksum.byteLength),
             input.signal,
           );
           await response.body?.cancel();
@@ -557,13 +597,14 @@ export class UserFiles {
           !partSize ||
           !Number.isSafeInteger(partSize) ||
           !Number.isSafeInteger(totalParts) ||
-          totalParts !== Math.ceil(bytes.byteLength / partSize)
+          totalParts !== Math.ceil(checksum.byteLength / partSize)
         )
           throw new TiDBLinkError(
             "Multipart upload plan does not cover the complete file",
           );
         parts = [];
         for (let number = 1; number <= totalParts!; number++) {
+          requireHashedLength(bytes, checksum.byteLength);
           const partBytes = bytes.subarray(
             (number - 1) * partSize,
             number * partSize,
@@ -582,7 +623,7 @@ export class UserFiles {
       }
       return requireReady(
         await this.completeUpload(uploadId, parts, options),
-        bytes.byteLength,
+        checksum.byteLength,
         checksum.hex,
       );
     } catch (cause) {
@@ -592,6 +633,8 @@ export class UserFiles {
           uploadId,
           cause,
         );
+      if (uploadId !== undefined && isUnsentFailure(cause))
+        throw new FileUploadError(metadata.idempotencyKey, uploadId, cause);
       throw cause;
     }
   }

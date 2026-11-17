@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, test } from "node:test";
 import {
+  ConnectionError,
+  FileUploadError,
+  FileUploadOutcomeUnknownError,
   OrganizationClient,
   OutcomeUnknownError,
   TiDBLinkApiError,
@@ -662,9 +665,8 @@ test("with an injected fetch, upload() and the explicit steps send the caller's 
 });
 
 test("a byte transfer that sent nothing fails as itself, not as an unknown outcome", async () => {
-  const closed = await serve(() => {});
-  const [server] = servers.splice(-1);
-  await new Promise((resolve) => server.close(resolve));
+  // Nothing can listen on port 0, so every connection is refused.
+  const closed = "http://127.0.0.1:0";
   const user = new OrganizationClient({ baseUrl: closed, apiKey }).user(
     "user_1",
   );
@@ -716,6 +718,19 @@ test("a byte transfer that sent nothing fails as itself, not as an unknown outco
         error instanceof TypeError && /changed size/.test(error.message),
     ),
   );
+  // An injected fetch cannot show what it sent, so the outcome stays unknown.
+  await assert.rejects(
+    new OrganizationClient({
+      baseUrl: "https://core.example",
+      apiKey,
+      fetch: async () => {
+        throw new TypeError("fetch failed");
+      },
+    })
+      .user("user_1")
+      .files.uploadContent("inline", new TextEncoder().encode("abc")),
+    OutcomeUnknownError,
+  );
 
   // Once the service may have received the body, the outcome is unknown.
   const dropping = await serve(async (req) => {
@@ -737,4 +752,182 @@ test("a byte transfer that sent nothing fails as itself, not as an unknown outco
       ),
     OutcomeUnknownError,
   );
+});
+
+test("upload() transfers that sent nothing carry the upload and key, apart from unknown outcomes", async () => {
+  const abort = new AbortController();
+  // Each case fails the byte transfer of an inline upload after creation.
+  const cases = [
+    {
+      // Fetch failed before reading the body: nothing was sent.
+      transfer: async () => {
+        throw new TypeError("fetch failed");
+      },
+      check: (error) =>
+        error instanceof FileUploadError &&
+        error.cause instanceof ConnectionError,
+    },
+    {
+      transfer: async () => {
+        abort.abort();
+        throw abort.signal.reason;
+      },
+      signal: abort.signal,
+      check: (error) =>
+        error instanceof FileUploadError && error.cause.name === "AbortError",
+    },
+    {
+      // Fetch read the body before failing: the service may have it.
+      transfer: async (init) => {
+        await Array.fromAsync(init.body);
+        throw new TypeError("fetch failed");
+      },
+      check: (error) =>
+        error instanceof FileUploadOutcomeUnknownError &&
+        !(error instanceof FileUploadError),
+    },
+  ];
+  for (const { transfer, check, signal } of cases) {
+    const service = uploadService("content");
+    const fetch = (input, init) =>
+      String(input).endsWith("/content")
+        ? transfer(init)
+        : service.fetch(input, init);
+    await withGlobalFetch(fetch, () =>
+      assert.rejects(
+        new OrganizationClient({ baseUrl: "https://core.example", apiKey })
+          .user("user_1")
+          .files.upload({
+            originalName: "note.txt",
+            bytes: new TextEncoder().encode("abc"),
+            idempotencyKey: "known-key",
+            ...(signal ? { signal } : {}),
+          }),
+        (error) =>
+          check(error) &&
+          error.uploadId === "shaped" &&
+          error.idempotencyKey === "known-key",
+      ),
+    );
+  }
+  // A refusal of the transfer is the service's error, as before.
+  const service = uploadService("content");
+  await withGlobalFetch(
+    (input, init) =>
+      String(input).endsWith("/content")
+        ? Response.json(
+            { error: { code: "drive_upload_refused", message: "No" } },
+            { status: 422 },
+          )
+        : service.fetch(input, init),
+    () =>
+      assert.rejects(
+        new OrganizationClient({ baseUrl: "https://core.example", apiKey })
+          .user("user_1")
+          .files.upload({
+            originalName: "note.txt",
+            bytes: new TextEncoder().encode("abc"),
+            idempotencyKey: "refused",
+          }),
+        (error) =>
+          error.constructor === TiDBLinkApiError &&
+          error.code === "drive_upload_refused",
+      ),
+  );
+  // A failure before the upload exists is the original error.
+  await withGlobalFetch(
+    async () => {
+      throw new TypeError("fetch failed");
+    },
+    () =>
+      assert.rejects(
+        new OrganizationClient({ baseUrl: "https://core.example", apiKey })
+          .user("user_1")
+          .files.upload({
+            originalName: "note.txt",
+            bytes: new TextEncoder().encode("abc"),
+            idempotencyKey: "no-upload",
+          }),
+        (error) =>
+          error instanceof FileUploadOutcomeUnknownError &&
+          error.uploadId === undefined,
+      ),
+  );
+});
+
+test("bytes that change size after hashing, or are shared, are never sent", async () => {
+  for (const injected of [false, true]) {
+    for (const shape of shapes) {
+      const service = uploadService(shape);
+      const bytes = new TextEncoder().encode("abc");
+      // The caller transfers its buffer away while the upload is being created.
+      const fetch = async (input, init) => {
+        if (String(input).endsWith("/uploads"))
+          structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+        return service.fetch(input, init);
+      };
+      const upload = () =>
+        new OrganizationClient({
+          baseUrl: "https://core.example",
+          apiKey,
+          ...(injected ? { fetch } : {}),
+        })
+          .user("user_1")
+          .files.upload({
+            originalName: "note.txt",
+            bytes,
+            idempotencyKey: `detached-${shape}`,
+          });
+      await withGlobalFetch(fetch, () =>
+        assert.rejects(
+          upload(),
+          (error) =>
+            error instanceof FileUploadError &&
+            error.cause instanceof TypeError &&
+            /changed size/.test(error.cause.message),
+        ),
+      );
+      assert.deepEqual(
+        service.byteRequests(bytes).map((r) => r.url),
+        [],
+        `${shape} ${injected}`,
+      );
+    }
+
+    const service = uploadService("content");
+    const files = new OrganizationClient({
+      baseUrl: "https://core.example",
+      apiKey,
+      ...(injected ? { fetch: service.fetch } : {}),
+    }).user("user_1").files;
+    const shared = new Uint8Array(new SharedArrayBuffer(3));
+    await withGlobalFetch(service.fetch, async () => {
+      await assert.rejects(
+        files.upload({
+          originalName: "note.txt",
+          bytes: shared,
+          idempotencyKey: "shared",
+        }),
+        /SharedArrayBuffer/,
+      );
+      await assert.rejects(
+        files.uploadContent("shaped", shared),
+        /SharedArrayBuffer/,
+      );
+      await assert.rejects(
+        files.uploadPart(
+          {
+            number: 1,
+            size: 3,
+            url: "https://storage.example/part",
+            headers: {},
+            expiresAt: "2099-01-01T00:00:00.000Z",
+          },
+          shared,
+        ),
+        /SharedArrayBuffer/,
+      );
+    });
+    assert.equal(service.sent.length, 0);
+  }
 });

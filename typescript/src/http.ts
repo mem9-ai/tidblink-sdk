@@ -15,8 +15,6 @@ type RetryMode = "never" | "safe";
 export interface RawRequestOptions extends Omit<RequestOptions, "body"> {
   body?: BodyInit;
   headers?: Record<string, string>;
-  /** Set with a streamed body; `HttpClient.bytesRequest()` sets it. */
-  duplex?: "half";
 }
 
 /** The body, headers and duplex mode that send a byte array. */
@@ -26,24 +24,42 @@ export interface BytesRequest {
   duplex?: "half";
 }
 
-/** Streamed bodies from `bytesRequest()` that fetch has not started to read. */
-const unreadBodies = new WeakSet<object>();
-/** The local error that stopped a streamed body before any of it was sent. */
-const bodyFailures = new WeakMap<object, Error>();
+/**
+ * Streamed bodies from `bytesRequest()` whose bytes fetch has not read, as
+ * `"unsent"`, or the local error that stopped one before it handed any over.
+ */
+const unsentBodies = new WeakMap<object, "unsent" | Error>();
 
 /**
- * Classify a failed send of `body`. Node's fetch reads a streamed body only
- * once it can send it, and the SDK's stream checks the bytes before it hands
- * over any, so either way nothing left the process and the service cannot
- * have accepted the request. Returns the local error that stopped the body,
- * `"unsent"` when fetch failed before reading it, or undefined when part of
- * the request may have been sent, as with any array body.
+ * Classify a failed send of `body`: the local error that stopped it,
+ * `"unsent"` when fetch failed before reading it, or undefined when some of it
+ * may have been sent, as with any array body. A fetch can send only the bytes
+ * it read, so an unsent body sent no body bytes and the service cannot have
+ * received the complete request, even if fetch sent its headers.
  */
-export const unsentBody = (body: unknown): Error | "unsent" | undefined => {
-  if (typeof body !== "object" || body === null) return undefined;
-  return (
-    bodyFailures.get(body) ?? (unreadBodies.has(body) ? "unsent" : undefined)
+export const unsentBody = (body: unknown): Error | "unsent" | undefined =>
+  typeof body === "object" && body !== null
+    ? unsentBodies.get(body)
+    : undefined;
+
+const unsentFailures = new WeakSet<object>();
+/** Record `error` as stopping an upload request before it sent any body bytes. */
+export const markUnsent = <T>(error: T): T => {
+  if (typeof error === "object" && error !== null) unsentFailures.add(error);
+  return error;
+};
+/** Whether `error` stopped an upload request before it sent any body bytes. */
+export const isUnsentFailure = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && unsentFailures.has(error);
+
+const changedSize = () =>
+  markUnsent(
+    new TypeError("Upload bytes changed size after they were hashed"),
   );
+
+/** Refuse bytes that no longer have the length that was hashed. */
+export const requireHashedLength = (bytes: Uint8Array, length: number): void => {
+  if (bytes.byteLength !== length) throw changedSize();
 };
 
 interface RequestOptions {
@@ -297,41 +313,41 @@ export class HttpClient {
   }
 
   /**
-   * The request fields that send `bytes` without a copy by the SDK, with a
-   * `content-length` taken from the same bytes. Node's fetch copies an array
-   * body, so with the default fetch the body is a stream of the caller's array
-   * itself, which fetch can read only once: send it once and never retry it.
-   * A custom fetch receives the array itself, a body every fetch accepts and
-   * can read again; whether it copies the bytes is up to that fetch.
+   * The request fields that send `bytes` without a copy by the SDK, with the
+   * `content-length` of the `length` bytes that were hashed. Node's fetch
+   * copies an array body, so with the default fetch the body is a stream of
+   * the caller's array itself, with `duplex: "half"`, which fetch can read only
+   * once: send it once and never retry it. A custom fetch receives the array
+   * itself, a body every fetch accepts and can read again; whether it copies
+   * the bytes is up to that fetch.
    */
   bytesRequest(
     bytes: Uint8Array,
     headers: Record<string, string>,
+    length: number,
   ): BytesRequest {
-    const length = bytes.byteLength;
+    requireHashedLength(bytes, length);
     headers = { ...headers, "content-length": String(length) };
     if (this.#customFetch)
       return { body: bytes as Uint8Array<ArrayBuffer>, headers };
     const body: ReadableStream<Uint8Array> = new ReadableStream(
       {
         pull(controller) {
-          unreadBodies.delete(body);
           if (bytes.byteLength !== length) {
-            const error = new TypeError(
-              "Upload bytes changed size before they were sent",
-            );
-            bodyFailures.set(body, error);
+            const error = changedSize();
+            unsentBodies.set(body, error);
             controller.error(error);
             return;
           }
+          unsentBodies.delete(body);
           if (length > 0) controller.enqueue(bytes);
           controller.close();
         },
       },
-      // Pull only when fetch reads, so an unread body shows nothing was sent.
+      // Pull only when fetch reads, so an unread body shows it sent no bytes.
       { highWaterMark: 0 },
     );
-    unreadBodies.add(body);
+    unsentBodies.set(body, "unsent");
     return { body, headers, duplex: "half" };
   }
 
@@ -497,15 +513,17 @@ export class HttpClient {
             ...(options.ifMatch ? { "if-match": options.ifMatch } : {}),
           },
           ...(options.body === undefined ? {} : { body: options.body }),
-          ...(options.duplex ? { duplex: options.duplex } : {}),
+          // Fetch requires it to send a stream.
+          ...(options.body instanceof ReadableStream ? { duplex: "half" } : {}),
           ...(options.signal ? { signal: options.signal } : {}),
         } as RequestInit);
       } catch (cause) {
         const unsent = unsentBody(options.body);
         if (unsent instanceof Error) throw unsent;
-        // A request that never left the process has a known outcome.
+        // The service cannot have received a request with no body bytes.
         const outcomeUnknown = options.outcomeUnknown && !unsent;
-        if (options.signal?.aborted && !outcomeUnknown) throw cause;
+        if (options.signal?.aborted && !outcomeUnknown)
+          throw unsent ? markUnsent(cause) : cause;
         if (attempt < attempts && !options.signal?.aborted) {
           await pauseBeforeRetry(
             100 * 2 ** (attempt - 1),
@@ -517,7 +535,7 @@ export class HttpClient {
         const ErrorClass = outcomeUnknown
           ? OutcomeUnknownError
           : ConnectionError;
-        throw new ErrorClass(
+        const error = new ErrorClass(
           outcomeUnknown
             ? "TiDB Link request outcome is unknown; do not repeat it automatically"
             : "Could not reach TiDB Link",
@@ -526,6 +544,7 @@ export class HttpClient {
             cause,
           },
         );
+        throw unsent ? markUnsent(error) : error;
       }
 
       if (response.ok)
