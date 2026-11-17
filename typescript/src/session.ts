@@ -432,8 +432,8 @@ export class Session {
   }
 
   /**
-   * Read a Turn with `stopRequestedAt`, when a request to stop it was
-   * accepted. A Turn can still be running after a stop request.
+   * Read a Turn with `stopRequestedAt`, when a request to stop its current
+   * execution was accepted. A Turn can still be running after a stop request.
    */
   getTurnState(turnId: string, options?: RequestOptions): Promise<TurnState> {
     return getTurnState(this.#http, this.id, turnId, options);

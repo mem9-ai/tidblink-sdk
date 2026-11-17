@@ -33,7 +33,10 @@ export interface TemplateContent {
    * On replace, omitting `tools` keeps the current references.
    */
   tools?: { mcp: { serverId: string }[] };
-  /** A task the voice model keeps working on across a Realtime connection. */
+  /**
+   * A task the voice model keeps working on across a Realtime connection;
+   * ignored when `realtime` is null.
+   */
   standingTask?: { goal: string };
   [field: string]: unknown;
 }

@@ -92,14 +92,19 @@ test("getTurnState returns the Turn with when a stop was requested", async (cont
     turn,
     stopRequestedAt: createdAt,
   });
-  assert.deepEqual(calls, [
-    "/api/v1/org/users/user_1/sessions/session%2F1/turns/turn_1",
-    "/api/v1/org/users/user_1/sessions/session%2F1/turns/turn_1",
-  ]);
-  body = { turn };
-  await assert.rejects(session.getTurnState("turn_1"), /no Turn stop state/);
+  for (const stopRequestedAt of [undefined, 0, "", "soon"]) {
+    body = { turn, stopRequestedAt };
+    await assert.rejects(
+      session.getTurnState("turn_1"),
+      /invalid Turn stop state/,
+    );
+  }
   body = { turn: { ...turn, id: "turn_2" }, stopRequestedAt: null };
   await assert.rejects(session.getTurnState("turn_1"), /different Turn/);
+  assert.deepEqual(
+    calls,
+    Array(7).fill("/api/v1/org/users/user_1/sessions/session%2F1/turns/turn_1"),
+  );
 });
 
 test("interaction pagination and exact command reconciliation preserve durable original receipts", async (context) => {

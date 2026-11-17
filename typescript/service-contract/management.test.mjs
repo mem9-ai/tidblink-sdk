@@ -59,7 +59,16 @@ test("Template mutations require idempotency keys and ETags", () => {
   const content = schema("OrganizationTemplateCreateDto").properties.content;
   for (const field of ["identity", "sandbox", "realtime"])
     assert(content.required.includes(field), field);
-  assert.equal(content.properties.realtime.nullable, true);
+  for (const name of [
+    "OrganizationTemplateCreateDto",
+    "OrganizationTemplateReplaceDto",
+    "OrganizationTemplateResultDto",
+  ])
+    assert.equal(
+      schema(name).properties.content.properties.realtime.nullable,
+      true,
+      name,
+    );
   assert.deepEqual(content.properties.realtime.properties.language.enum, [
     "zh-CN",
     "en-US",

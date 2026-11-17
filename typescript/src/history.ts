@@ -482,8 +482,10 @@ export const history = (
 export interface TurnState {
   turn: TurnRecord;
   /**
-   * When a request to stop the Turn was durably accepted, or null. The Turn
-   * can still be running while the stop converges.
+   * When a request to stop the Turn's current execution was durably
+   * accepted, or null. The Turn can still be running while the stop
+   * converges, and a checkpoint retry of the Turn starts a new execution
+   * without one.
    */
   stopRequestedAt: string | null;
 }
@@ -532,8 +534,12 @@ export const getTurnState = async (
     turnId,
     options,
   );
-  if (!nullableText(stopRequestedAt))
-    throw new TiDBLinkError("TiDB Link returned no Turn stop state", {
+  if (
+    stopRequestedAt !== null &&
+    (typeof stopRequestedAt !== "string" ||
+      !Number.isFinite(Date.parse(stopRequestedAt)))
+  )
+    throw new TiDBLinkError("TiDB Link returned an invalid Turn stop state", {
       requestId,
     });
   return { turn, stopRequestedAt };

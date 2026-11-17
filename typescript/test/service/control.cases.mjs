@@ -87,6 +87,7 @@ test("SDK cancellation settles the original Turn and disabled retry remains a re
   );
   const stopped = await session.getTurnState(started.turnId);
   assert.equal(stopped.turn.id, started.turnId);
+  assert.equal(stopped.turn.status, "interrupted");
   assert.equal(typeof stopped.stopRequestedAt, "string");
   const original = await session.getInteraction(started.inputId);
   const cancellation = await session.getInteraction(command.clientEventId);
