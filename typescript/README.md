@@ -811,6 +811,10 @@ Acceptance requests a stop; it does not establish termination or undo completed
 effects. Read the cancellation receipt or the original message receipt until its
 `result.status` is terminal. A completed Turn can retain success if completion won
 the race. A stale target is refused rather than cancelling its successor.
+`session.getTurnState(turnId)` returns the Turn with `stopRequestedAt`, when a
+request to stop its current execution was accepted, or null; a Turn can still be
+`running` after a stop request, so check both before acting for it. A checkpoint
+retry starts a new execution of the Turn without a stop request.
 
 Checkpoint retry deliberately starts another execution of the selected Turn:
 

@@ -478,24 +478,71 @@ export const history = (
     options,
   );
 
-export const getTurn = async (
+/** A Turn and whether anyone asked it to stop. */
+export interface TurnState {
+  turn: TurnRecord;
+  /**
+   * When a request to stop the Turn's current execution was durably
+   * accepted, or null. The Turn can still be running while the stop
+   * converges, and a checkpoint retry of the Turn starts a new execution
+   * without one.
+   */
+  stopRequestedAt: string | null;
+}
+
+const readTurn = async (
   http: HttpClient,
   sessionId: string,
   turnId: string,
   options?: RequestOptions,
-): Promise<TurnRecord> => {
+): Promise<{ turn: TurnRecord; stopRequestedAt?: unknown; requestId: string }> => {
   if (options)
     requireKnownKeys(options, ["requestId", "signal"], "Request options");
-  const result = await http.getResponse<{ turn?: TurnRecord }>(
-    `${sessionPath(sessionId)}/turns/${encodeURIComponent(turnId)}`,
-    options,
-  );
+  const result = await http.getResponse<{
+    turn?: TurnRecord;
+    stopRequestedAt?: unknown;
+  }>(`${sessionPath(sessionId)}/turns/${encodeURIComponent(turnId)}`, options);
   const turn = result.data?.turn;
   if (turn?.id !== turnId || turn.sessionId !== sessionId)
     throw new TiDBLinkError("TiDB Link returned a different Turn", {
       requestId: result.requestId,
     });
-  return turn;
+  return {
+    turn,
+    stopRequestedAt: result.data.stopRequestedAt,
+    requestId: result.requestId,
+  };
+};
+
+export const getTurn = async (
+  http: HttpClient,
+  sessionId: string,
+  turnId: string,
+  options?: RequestOptions,
+): Promise<TurnRecord> =>
+  (await readTurn(http, sessionId, turnId, options)).turn;
+
+export const getTurnState = async (
+  http: HttpClient,
+  sessionId: string,
+  turnId: string,
+  options?: RequestOptions,
+): Promise<TurnState> => {
+  const { turn, stopRequestedAt, requestId } = await readTurn(
+    http,
+    sessionId,
+    turnId,
+    options,
+  );
+  if (
+    stopRequestedAt !== null &&
+    (typeof stopRequestedAt !== "string" ||
+      !Number.isFinite(Date.parse(stopRequestedAt)))
+  )
+    throw new TiDBLinkError("TiDB Link returned an invalid Turn stop state", {
+      requestId,
+    });
+  return { turn, stopRequestedAt };
 };
 
 export const timeline = (

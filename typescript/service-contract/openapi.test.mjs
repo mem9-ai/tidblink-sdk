@@ -231,6 +231,17 @@ test("cancel and checkpoint retry keep exact command identities and distinct rec
     );
 });
 
+test("a Turn read reports when a stop was requested", () => {
+  const read = schema("TurnResponse");
+  assert.deepEqual(read.required, ["turn", "stopRequestedAt"]);
+  assert.equal(read.properties.stopRequestedAt.type, "string");
+  assert.equal(read.properties.stopRequestedAt.nullable, true);
+  const answer =
+    document.paths[`${sessionPath}/turns/{turnId}`].get.responses["200"]
+      .content["application/json"].schema;
+  assert.equal(answer.$ref, "#/components/schemas/TurnResponse");
+});
+
 test("target-User usage preserves Organization authority, exact ranges and its result projection", () => {
   const org = document.paths["/api/v1/org/users/{userId}/billing/usage"].get;
   const orgDetails =

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add `session.getTurnState(turnId)`, which returns the Turn with
+  `stopRequestedAt`: when a request to stop its current execution was
+  accepted, or null. A Turn can still be running after a stop request;
+  `getTurn()` alone did not show one.
+- Breaking for TypeScript: `TemplateContent.realtime` is now
+  `{ language } | null`, because the service accepts and returns `null` for a
+  Template without voice. Code that reads `content.realtime.language` must
+  handle `null` first.
+
 ## 0.4.0-rc.1
 
 - Observing Session connections bound the events waiting for their

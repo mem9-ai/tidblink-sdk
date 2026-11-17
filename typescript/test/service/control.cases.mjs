@@ -63,6 +63,10 @@ test("SDK cancellation settles the original Turn and disabled retry remains a re
   const input = { clientEventId: randomUUID(), text: "SDK_FIXTURE_PAUSE" };
   const started = await session.submitMessage(input);
   await incorporated(session, started.inputId);
+  assert.equal(
+    (await session.getTurnState(started.turnId)).stopRequestedAt,
+    null,
+  );
   const command = { clientEventId: randomUUID(), turnId: started.turnId };
   const accepted = await controlTurnWorkflow({
     baseUrl: process.env.SDK_SERVICE_URL,
@@ -81,6 +85,10 @@ test("SDK cancellation settles the original Turn and disabled retry remains a re
     }),
     TurnInterruptedError,
   );
+  const stopped = await session.getTurnState(started.turnId);
+  assert.equal(stopped.turn.id, started.turnId);
+  assert.equal(stopped.turn.status, "interrupted");
+  assert.equal(typeof stopped.stopRequestedAt, "string");
   const original = await session.getInteraction(started.inputId);
   const cancellation = await session.getInteraction(command.clientEventId);
   assert.equal(cancellation.result.status, "interrupted");
