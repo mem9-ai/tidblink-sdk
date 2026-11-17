@@ -7,6 +7,7 @@ The TypeScript SDK lives in [`typescript/`](typescript/README.md). It targets No
 runtime dependencies.
 
 - [TypeScript quick start](typescript/README.md#quick-start)
+- [Examples by scenario and language](examples/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [Release process](RELEASING.md)
 - [Changelog](CHANGELOG.md)

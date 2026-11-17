@@ -674,6 +674,9 @@ templateId, device, store })` returns:
   offline a temporary connection is used and the lamp's tools fail at once.
 - `onDeviceWantsToTalk(deviceId)`: sends the lamp a Realtime grant.
 
+Every TiDB Link SDK provides this example with the same behaviour and tools; see
+its [specification](https://github.com/mem9-ai/tidblink-sdk/blob/main/examples/lamp/README.md).
+
 `device` is your channel to the lamps: `isOnline(deviceId)`,
 `request(deviceId, command, args, { signal })` and `send(deviceId, topic,
 payload)`. Wired to MQTT, with the lamp announcing itself through a retained
