@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { OrganizationClient } from "@tidblink/server";
 
 /**
@@ -12,7 +13,11 @@ import { OrganizationClient } from "@tidblink/server";
  *   works; its tools then fail at once and the model says so.
  * - For voice the backend hands the lamp a short-lived grant; the lamp opens
  *   the Realtime WebSocket itself and audio never passes through here.
+ * - Each lamp model has its own Template, all under one Organization API Key.
+ *   A lamp's Session starts on its model's Template and switches Template when
+ *   the lamp changes model, keeping its conversation history.
  *
+ * `templates` maps each lamp model to its Template ID, e.g. { standard, pro }.
  * `device` is your channel to the lamps:
  *   isOnline(deviceId) -> boolean
  *   request(deviceId, command, args, { signal }) -> Promise<result>, rejects on failure
@@ -23,7 +28,7 @@ import { OrganizationClient } from "@tidblink/server";
 export function createLampBackend({
   baseUrl,
   organizationApiKey,
-  templateId,
+  templates,
   device,
   store = memoryStore(),
   onChat = () => {},
@@ -79,6 +84,11 @@ export function createLampBackend({
     };
   };
 
+  const templateOf = (model) => {
+    if (!Object.hasOwn(templates, model)) throw new Error(`Unknown lamp model ${model}`);
+    return templates[model];
+  };
+
   const sessionOf = async (deviceId) => {
     const binding = await store.binding(deviceId);
     if (!binding) throw new Error(`Lamp ${deviceId} is not bound to a user`);
@@ -98,15 +108,38 @@ export function createLampBackend({
   return {
     organization,
 
-    /** The user binds a lamp in the app: one End User per app user, one Session per lamp. */
-    async bindDevice(appUserId, deviceId) {
+    /**
+     * The user binds a lamp in the app: one End User per app user, one Session
+     * per lamp, created from the Template of the lamp's model.
+     */
+    async bindDevice(appUserId, deviceId, model) {
+      const templateId = templateOf(model);
       const user = await organization.createEndUser({ externalId: appUserId }); // safe to repeat
       const session = await organization.user(user.userId).createSession({
         templateId,
-        idempotencyKey: `lamp.${deviceId}`, // one Session per lamp, also after a retry
+        // One Session per lamp, also after a retry. Binding again with another
+        // model is refused; change the model with changeModel instead.
+        idempotencyKey: `lamp.${deviceId}`,
       });
       await store.bind(deviceId, { userId: user.userId, sessionId: session.id });
       return session.id;
+    },
+
+    /**
+     * The lamp changed model, e.g. after an upgrade: move its Session to that
+     * model's Template. The conversation history stays; when there is some, the
+     * receipt is `pending` while a Handoff Turn runs under the new Template.
+     * Pass the same `changeId` again to recover a lost response. While a Turn
+     * runs or the lamp is talking, the service refuses with ConflictError
+     * `session_switch_busy`.
+     */
+    async changeModel(deviceId, model, { changeId = randomUUID() } = {}) {
+      const templateId = templateOf(model);
+      const session = await sessionOf(deviceId);
+      return session.switchTemplate({
+        templateId,
+        idempotencyKey: `lamp.${deviceId}.${changeId}`,
+      });
     },
 
     /** The lamp came online: keep its Session connected while it stays online. */

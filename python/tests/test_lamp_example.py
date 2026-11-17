@@ -1,4 +1,4 @@
-"""Required tests 1-3 of ``examples/lamp/README.md`` (``typescript/test/lamp-example.test.mjs``)."""
+"""Required tests 1-4 of ``examples/lamp/README.md`` (``typescript/test/lamp-example.test.mjs``)."""
 
 from __future__ import annotations
 
@@ -65,6 +65,9 @@ class FakeLamps:
         self.sent.append((device_id, topic, payload))
 
 
+TEMPLATES = {"standard": "template_standard", "pro": "template_pro"}
+
+
 async def bound_store() -> MemoryStore:
     store = MemoryStore()
     await store.bind("lamp-1", LampBinding(user_id="user_1", session_id="sess_1"))
@@ -94,7 +97,7 @@ async def lamp_backend(harness: Harness, core: FakeCore, device: FakeLamps, stor
     backend = create_lamp_backend(
         base_url=core.base_url,
         organization_api_key=API_KEY,
-        template_id="template_lamp",
+        templates=TEMPLATES,
         device=device,
         store=store or await bound_store(),
         http_client=harness.http_client(lamp_http),
@@ -183,3 +186,64 @@ async def test_a_lamp_that_another_process_took_over_is_no_longer_online_here(ha
         await backend.on_device_wants_to_talk("lamp-1")
     with pytest.raises(LookupError, match="not bound"):
         await backend.on_device_online("lamp-unbound")
+
+
+async def test_a_lamps_session_starts_on_its_models_template_and_switches_template_when_the_model_changes(
+    harness: Harness,
+) -> None:
+    requests: list[tuple[str, str | None, Any]] = []
+
+    def http(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        path = request.url.path
+        requests.append((path, request.headers.get("idempotency-key"), body))
+        if path.endswith("/users"):
+            return json_response({"user": {"userId": "user_1", "externalId": body["externalId"]}}, 201)
+        if path.endswith("/users/user_1/sessions"):
+            session = {"sessionId": "sess_1", "template": {"templateId": body["agentTemplateId"]}}
+            return httpx.Response(201, json={"session": session}, headers={"etag": '"session-v1"'})
+        if path.endswith("/sessions/sess_1/template-switches"):
+            switch = {
+                "commandId": "cmd_1",
+                "sessionId": "sess_1",
+                "agentTemplateId": body["agentTemplateId"],
+                "configurationEpoch": 1,
+                "status": "pending",
+                "handoffTurnId": "turn_handoff",
+                "createdAt": "2026-11-13T00:00:00.000Z",
+            }
+            return json_response({"receipt": switch}, 202)
+        return httpx.Response(404)
+
+    core = await harness.core()
+    store = MemoryStore()
+    backend = create_lamp_backend(
+        base_url=core.base_url,
+        organization_api_key=API_KEY,
+        templates=TEMPLATES,
+        device=FakeLamps(set()),
+        store=store,
+        http_client=harness.http_client(http),
+    )
+    harness.closers.insert(0, backend.close)
+
+    with pytest.raises(ValueError, match="Unknown lamp model mini"):
+        await backend.bind_device("app-user-1", "lamp-1", "mini")
+    assert requests == []
+    assert await backend.bind_device("app-user-1", "lamp-1", "standard") == "sess_1"
+    assert await store.binding("lamp-1") == LampBinding(user_id="user_1", session_id="sess_1")
+    created = next(r for r in requests if r[0].endswith("/sessions"))
+    assert created[1] == "lamp.lamp-1"
+    assert created[2]["agentTemplateId"] == "template_standard"
+
+    with pytest.raises(ValueError, match="Unknown lamp model mini"):
+        await backend.change_model("lamp-1", "mini")
+    switched = await backend.change_model("lamp-1", "pro", change_id="upgrade-1")
+    assert switched["status"] == "pending"
+    assert switched["handoffTurnId"] == "turn_handoff"
+    path, key, body = requests[-1]
+    assert path.endswith("/sessions/sess_1/template-switches")
+    assert key == "lamp.lamp-1.upgrade-1"
+    assert body == {"agentTemplateId": "template_pro"}
+    with pytest.raises(LookupError, match="not bound"):
+        await backend.change_model("lamp-unbound", "pro")

@@ -10,13 +10,17 @@ Both share one Session, so one conversation history. See ``examples/lamp/README.
   works; its tools then fail at once and the model says so.
 - For voice the backend hands the lamp a short-lived grant; the lamp opens
   the Realtime WebSocket itself and audio never passes through here.
+- Each lamp model has its own Template, all under one Organization API Key.
+  A lamp's Session starts on its model's Template and switches Template when
+  the lamp changes model, keeping its conversation history.
 """
 
 from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Awaitable, Callable
+import uuid
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -25,7 +29,7 @@ import httpx
 from tidblink_server import OrganizationClient
 from tidblink_server.realtime import RealtimeConnectGrant
 from tidblink_server.session import Session
-from tidblink_server import ClientToolCallContext, ClientToolHandler, SessionConnection
+from tidblink_server import ClientToolCallContext, ClientToolHandler, SessionConnection, TemplateSwitchReceipt
 
 
 class Device(Protocol):
@@ -98,15 +102,18 @@ class LampBackend:
         *,
         base_url: str,
         organization_api_key: str,
-        template_id: str,
+        templates: Mapping[str, str],
         device: Device,
         store: LampStore | None = None,
         on_chat: OnChat | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        """``http_client`` is passed to the OrganizationClient, e.g. for a proxy or tests."""
+        """``templates`` maps each lamp model to its Template ID, e.g. ``{"standard": ..., "pro": ...}``.
+
+        ``http_client`` is passed to the OrganizationClient, e.g. for a proxy or tests.
+        """
         self.organization = OrganizationClient(base_url=base_url, api_key=organization_api_key, http_client=http_client)
-        self._template_id = template_id
+        self._templates = dict(templates)
         self._device = device
         self._store: LampStore = store if store is not None else MemoryStore()
         self._on_chat = on_chat
@@ -169,6 +176,12 @@ class LampBackend:
             ),
         }
 
+    def _template_of(self, model: str) -> str:
+        template_id = self._templates.get(model)
+        if template_id is None:
+            raise ValueError(f"Unknown lamp model {model}")
+        return template_id
+
     async def _session_of(self, device_id: str) -> Session:
         binding = await self._store.binding(device_id)
         if binding is None:
@@ -198,15 +211,39 @@ class LampBackend:
 
     # Operations ---------------------------------------------------------------------
 
-    async def bind_device(self, app_user_id: str, device_id: str) -> str:
-        """The user binds a lamp in the app: one End User per app user, one Session per lamp."""
+    async def bind_device(self, app_user_id: str, device_id: str, model: str) -> str:
+        """The user binds a lamp in the app: one End User per app user, one Session per lamp.
+
+        The Session is created from the Template of the lamp's model.
+        """
+        template_id = self._template_of(model)
         user = await self.organization.create_end_user(external_id=app_user_id)  # safe to repeat
         session = await self.organization.user(user["userId"]).create_session(
-            template_id=self._template_id,
-            idempotency_key=f"lamp.{device_id}",  # one Session per lamp, also after a retry
+            template_id=template_id,
+            # One Session per lamp, also after a retry. Binding again with another
+            # model is refused; change the model with change_model instead.
+            idempotency_key=f"lamp.{device_id}",
         )
         await self._store.bind(device_id, LampBinding(user_id=user["userId"], session_id=session.id))
         return session.id
+
+    async def change_model(
+        self, device_id: str, model: str, *, change_id: str | None = None
+    ) -> TemplateSwitchReceipt:
+        """The lamp changed model, e.g. after an upgrade: move its Session to that model's Template.
+
+        The conversation history stays; when there is some, the receipt is
+        ``pending`` while a Handoff Turn runs under the new Template. Pass the
+        same ``change_id`` again to recover a lost response. While a Turn runs
+        or the lamp is talking, the service refuses with ``ConflictError``
+        ``session_switch_busy``.
+        """
+        template_id = self._template_of(model)
+        session = await self._session_of(device_id)
+        return await session.switch_template(
+            template_id=template_id,
+            idempotency_key=f"lamp.{device_id}.{change_id or uuid.uuid4()}",
+        )
 
     async def on_device_online(self, device_id: str) -> None:
         """The lamp came online: keep its Session connected while it stays online."""
@@ -269,7 +306,7 @@ def create_lamp_backend(
     *,
     base_url: str,
     organization_api_key: str,
-    template_id: str,
+    templates: Mapping[str, str],
     device: Device,
     store: LampStore | None = None,
     on_chat: OnChat | None = None,
@@ -278,7 +315,7 @@ def create_lamp_backend(
     return LampBackend(
         base_url=base_url,
         organization_api_key=organization_api_key,
-        template_id=template_id,
+        templates=templates,
         device=device,
         store=store,
         on_chat=on_chat,

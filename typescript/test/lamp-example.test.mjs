@@ -186,13 +186,14 @@ const toolCall = (callId, name, args) => ({
     deadlineAt: new Date(Date.now() + 60000).toISOString(),
   },
 });
+const templates = { standard: "template_standard", pro: "template_pro" };
 const backends = [];
 after(() => Promise.all(backends.map((backend) => backend.close())));
 const lampBackend = async (server, device, store) => {
   const backend = createLampBackend({
     baseUrl: server.baseUrl,
     organizationApiKey: apiKey,
-    templateId: "template_lamp",
+    templates,
     device,
     store: store ?? (await boundStore()),
   });
@@ -272,4 +273,55 @@ test("a lamp that another process took over is no longer online here", async () 
   await delay(50);
   await assert.rejects(backend.onDeviceWantsToTalk("lamp-1"), /not online/);
   await assert.rejects(backend.onDeviceOnline("lamp-unbound"), /not bound/);
+});
+
+test("a lamp's Session starts on its model's Template and switches Template when the model changes", async () => {
+  const calls = [];
+  const server = await start({
+    http: async (req, res) => {
+      let text = "";
+      for await (const chunk of req) text += chunk;
+      const body = text ? JSON.parse(text) : undefined;
+      calls.push({ method: req.method, url: req.url, key: req.headers["idempotency-key"], body });
+      if (req.url.endsWith("/users"))
+        return json(res, { user: { userId: "user_1", externalId: body.externalId } }, 201);
+      if (req.url.endsWith("/users/user_1/sessions")) {
+        res.setHeader("etag", '"session-v1"');
+        return json(res, { session: { sessionId: "sess_1", template: { templateId: body.agentTemplateId } } }, 201);
+      }
+      if (req.url.endsWith("/sessions/sess_1/template-switches"))
+        return json(res, {
+          receipt: {
+            commandId: "cmd_1",
+            sessionId: "sess_1",
+            agentTemplateId: body.agentTemplateId,
+            configurationEpoch: 1,
+            status: "pending",
+            handoffTurnId: "turn_handoff",
+            createdAt: at,
+          },
+        }, 202);
+      res.writeHead(404).end();
+    },
+  });
+  const store = memoryStore();
+  const backend = await lampBackend(server, fakeLamps(new Set()), store);
+
+  await assert.rejects(backend.bindDevice("app-user-1", "lamp-1", "mini"), /Unknown lamp model mini/);
+  assert.equal(calls.length, 0);
+  assert.equal(await backend.bindDevice("app-user-1", "lamp-1", "standard"), "sess_1");
+  assert.deepEqual(await store.binding("lamp-1"), { userId: "user_1", sessionId: "sess_1" });
+  const created = calls.find((call) => call.url.endsWith("/sessions"));
+  assert.equal(created.key, "lamp.lamp-1");
+  assert.equal(created.body.agentTemplateId, "template_standard");
+
+  await assert.rejects(backend.changeModel("lamp-1", "mini"), /Unknown lamp model mini/);
+  const receipt = await backend.changeModel("lamp-1", "pro", { changeId: "upgrade-1" });
+  assert.equal(receipt.status, "pending");
+  assert.equal(receipt.handoffTurnId, "turn_handoff");
+  const switched = calls.at(-1);
+  assert.match(switched.url, /\/sessions\/sess_1\/template-switches$/);
+  assert.equal(switched.key, "lamp.lamp-1.upgrade-1");
+  assert.deepEqual(switched.body, { agentTemplateId: "template_pro" });
+  await assert.rejects(backend.changeModel("lamp-unbound", "pro"), /not bound/);
 });

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Breaking:** the `lamp-backend.mjs` example uses one Template per lamp model.
+  `createLampBackend` takes `templates`, a map from lamp model to Template ID,
+  instead of `templateId`, and `bindDevice(appUserId, deviceId, model)` creates
+  the lamp's Session from its model's Template. The new
+  `changeModel(deviceId, model, { changeId? })` moves the Session to another
+  model's Template with `session.switchTemplate()`, keeping its history.
+
 ## 0.4.0-rc.2
 
 - Align with service
