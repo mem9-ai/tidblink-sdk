@@ -112,7 +112,9 @@ cleanup. Application policies and K3 spending policy are separate concerns.
 Pass `fetch` to route every request through your own transport, for example a
 proxy, a custom HTTP agent, instrumentation or a test double. It carries all
 requests the client makes: JSON calls, event streams, and file transfers to
-presigned storage URLs (which never receive the API Key).
+presigned storage URLs (which never receive the API Key). File uploads give it
+the caller's `Uint8Array` as the body, not the one-shot stream the default
+fetch receives; see [File attachments](#file-attachments).
 
 ```js
 const organization = new OrganizationClient({
@@ -990,6 +992,27 @@ cannot grant access to another User's file. File bytes remain separate from the
 message text. `capabilities()` exposes current upload limits; a typed 413 requires
 reading them again and explicitly deciding whether to create another upload.
 
+`upload()`, `uploadContent()` and `uploadPart()` hash and send the bytes you pass
+without copying them. Leave those bytes unchanged until the call settles; a
+change made meanwhile can make the sent bytes differ from their checksum, and
+bytes whose length changed after hashing are refused with a `TypeError` before
+they are sent. Bytes in a `SharedArrayBuffer` are refused, because another
+thread could change them.
+
+When you pass no `fetch` option, the request body is a stream of your array,
+sent with `duplex: "half"`, so Node.js's fetch does not copy the file either and
+a large file is held in memory once. Such a body can be sent only once, and the
+SDK never repeats a byte transfer. The stream goes to whatever
+`globalThis.fetch` is at the time, so a replacement global fetch must accept a
+streaming body with `duplex: "half"`; otherwise pass it as the `fetch` option.
+
+With a [custom `fetch`](#custom-transport), the body is your own `Uint8Array`,
+which any fetch implementation accepts and can read again; whether it copies
+the bytes is up to that fetch, and Node.js's fetch does. The body can be a view
+that starts at a non-zero `byteOffset`, as a `Buffer` often is, or a
+`subarray()` of your bytes for a multipart part: send its `byteLength` bytes
+from that offset, and never serialize or transfer its whole `buffer`.
+
 For explicit recovery use `createUpload()` with the original metadata and key,
 `getUpload(uploadId)`, `uploadContent()`, `presignPart()` / `uploadPart()`,
 `completeUpload()`, and `cancelUpload()`. Retain each returned part number, ETag
@@ -1000,7 +1023,15 @@ and file. The SDK never chooses that new identity or repeats a failed transfer
 automatically.
 
 `FileUploadOutcomeUnknownError` carries `idempotencyKey` and, once creation was
-acknowledged, `uploadId`. Read that upload before deciding what to repeat. A lost
+acknowledged, `uploadId`. A byte transfer that fails before fetch reads any of
+its body, such as a refused connection or an abort, sent no body bytes, so it
+is not an unknown outcome: `uploadContent()` and `uploadPart()` throw the
+`ConnectionError`, the abort or the local error, and `upload()` throws a
+`FileUploadError` with the same `idempotencyKey` and `uploadId` and that error
+as `cause`. So do bytes whose length changed after hashing. Only the default
+fetch lets the SDK tell that nothing was sent; with a custom `fetch` such a
+failure is an unknown outcome. Read the upload before deciding what to repeat.
+A lost
 creation response can be reconciled with `createUpload()` using the exact
 original metadata and key. A pending multipart part can be signed again for its
 original digest; after an uncertain completion, read status rather than assuming
