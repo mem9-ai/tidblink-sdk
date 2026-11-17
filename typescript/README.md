@@ -99,8 +99,8 @@ client nor a media client.
 
 After Organization Key rotation or revocation, create a new `OrganizationClient`
 with fresh valid authority and select the same User. Existing handles retain their
-old credential. New old-authority requests, subscriptions,
-Realtime tokens and Organization-issued file tickets lose authority. Accepted
+old credential. New old-authority requests, Backend Connections (closed with
+4001), Realtime tokens and Organization-issued file tickets lose authority. Accepted
 Turns continue, and admitted file transfers may finish. Reconnect/obtain new
 grants with fresh authority and reconcile the original command before submitting
 new work. Another valid Key remains usable. Disabled Users cannot start new work;
@@ -488,7 +488,7 @@ Set those five environment variables to run the installed example directly:
 `node node_modules/@tidblink/server/examples/send-message.mjs`. It prints only the
 final answer. Preserve the input across invocations; each new command identity
 can start new work. This slice replaces the obsolete response-owned NDJSON
-`streamTurn` API. Use the independent progress subscription below.
+`streamTurn` API. Follow progress over a Session connection, below.
 
 ## Progress and Session events
 
@@ -597,7 +597,10 @@ const lampTools = (deviceId: string): ClientToolHandlers => ({
   core reports as not performed was never executed. A call that nobody claims
   within the core's claim window (5 seconds) is reported to the model as not
   performed. So is a call made while no connection executes the Session: the
-  core reports it as not performed at once and never sends it.
+  core reports it as not performed at once, never sends it, and records no
+  `requires_action` event for it; it appears only as a failed Operation step.
+  For a few seconds after a connection drops, the core may still count it as
+  executing, and such a call gets the claim window instead.
 - **Results.** A returned string is what the model receives; other values are
   sent as JSON. A thrown error becomes a failure whose message the model sees.
   A tool the connection has no handler for fails with a message saying so.
@@ -615,9 +618,9 @@ const lampTools = (deviceId: string): ClientToolHandlers => ({
 
 A result the core does not accept, for example after the call's deadline,
 reaches `onError` as a `ClientToolResultRefusedError` with the core's `reason`.
-Calls are answered only on the executing connection; no REST command answers
-them. The `requires_action` event that records a call carries its `claimBy` but
-authorizes nothing.
+Calls are executed only by the Session's executing connection; no REST command
+answers them. The `requires_action` event that records a call carries its
+`claimBy` but authorizes nothing.
 
 ### Messages and voice on a connection
 
@@ -944,7 +947,7 @@ reset; it is separate from `progress` and the final `assistant_message`.
 
 **The audio request owns execution's response.** Breaking its event loop, aborting
 its signal or losing the connection may request interruption. This differs from
-closing a text observation subscription. EOF alone is never reported as success.
+waiting for a text Turn, which never interrupts it. EOF alone is never reported as success.
 `AudioTurnStoppedError` preserves the Session and any already observed Turn ID;
 inspect `getTurn(turnId)` or saved history before deciding what to submit next.
 Audio accepts no `clientEventId`, has no ordinary text interaction receipt and

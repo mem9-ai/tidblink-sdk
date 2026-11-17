@@ -9,7 +9,8 @@
   neither. A Client Tool call made while no Session connection executes the
   Session is now reported to the model as not performed at once, instead of
   waiting out its 60-second deadline; it reaches no connection, so no `run`
-  handler sees it. Every new call carries `claimBy`.
+  handler sees it, and no `requires_action` event or audio `client_tool_calls`
+  frame records it. Every new call carries `claimBy`.
 - `files.upload()`, `uploadContent()` and `uploadPart()` hash and send the
   caller's bytes in place instead of copying them: the SDK and Node.js fetch
   used to hold about three more copies of a file while it uploaded. Leave the
