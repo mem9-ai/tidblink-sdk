@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 
 import {
-  bytesBody,
   requestOptions,
   HttpClient,
   requireKnownKeys,
+  unsentBody,
+  type BytesRequest,
 } from "./http.js";
 import {
   OutcomeUnknownError,
@@ -138,15 +139,18 @@ export class FileUploadOutcomeUnknownError extends OutcomeUnknownError {
 
 const uploadPath = (id: string) =>
   `/drive/uploads/${encodeURIComponent(id)}`;
+interface Checksum {
+  hex: string;
+  base64: string;
+}
 /** SHA-256 of the bytes, read in place: Web Crypto's digest would copy them first. */
-const digest = (bytes: Uint8Array) => {
+const digest = (bytes: Uint8Array): Checksum => {
   const value = createHash("sha256").update(bytes).digest();
-  return {
-    hex: Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join(
-      "",
-    ),
-    base64: btoa(String.fromCharCode(...value)),
-  };
+  return { hex: value.toString("hex"), base64: value.toString("base64") };
+};
+const requireBytes = (bytes: unknown): void => {
+  if (!(bytes instanceof Uint8Array))
+    throw new TypeError("File bytes must be a Uint8Array");
 };
 const fileReceipt = (
   value: { file?: UserFile },
@@ -311,18 +315,25 @@ export class UserFiles {
     options?: RequestOptions,
   ): Promise<UserFile> {
     options = requestOptions(options);
-    const checksum = digest(bytes);
+    requireBytes(bytes);
+    return this.#sendContent(uploadId, bytes, digest(bytes), options);
+  }
+
+  async #sendContent(
+    uploadId: string,
+    bytes: Uint8Array,
+    checksum: Checksum,
+    options: RequestOptions,
+  ): Promise<UserFile> {
     const { response, requestId } = await this.#http.rawResponse(
       `${uploadPath(uploadId)}/content`,
       {
         ...options,
         method: "PUT",
-        body: bytesBody(bytes),
-        headers: {
+        ...this.#http.bytesRequest(bytes, {
           "content-type": "application/octet-stream",
-          "content-length": String(bytes.byteLength),
           "content-digest": `sha-256=:${checksum.base64}:`,
-        },
+        }),
         outcomeUnknown: true,
       },
     );
@@ -381,21 +392,29 @@ export class UserFiles {
     options?: RequestOptions,
   ): Promise<UploadedFilePart> {
     options = requestOptions(options);
+    requireBytes(bytes);
+    return this.#sendPart(part, bytes, digest(bytes), options);
+  }
+
+  async #sendPart(
+    part: FileUploadPart,
+    bytes: Uint8Array,
+    checksum: Checksum,
+    options: RequestOptions,
+  ): Promise<UploadedFilePart> {
     if (bytes.byteLength !== part.size)
       throw new TypeError("Part bytes do not match the signed size");
-    const checksum = digest(bytes);
     const signedChecksum = new Headers(part.headers).get(
       "x-amz-checksum-sha256",
     );
     if (signedChecksum !== checksum.base64)
       throw new TypeError("Part bytes do not match the signed checksum");
-    const response = await this.transfer(part.url, part.expiresAt, {
-      method: "PUT",
-      headers: { ...part.headers, "content-length": String(bytes.byteLength) },
-      body: bytesBody(bytes),
-      duplex: "half",
-      ...(options?.signal ? { signal: options.signal } : {}),
-    });
+    const response = await this.transfer(
+      part.url,
+      part.expiresAt,
+      this.#http.bytesRequest(bytes, part.headers),
+      options.signal,
+    );
     const etag = response.headers.get("etag");
     await response.body?.cancel();
     if (!etag)
@@ -405,20 +424,38 @@ export class UserFiles {
     return { number: part.number, etag, sha256: checksum.hex };
   }
 
+  /** PUT bytes to a transfer grant, which carries its own authority. */
   private async transfer(
     url: string,
     expiresAt: string,
-    init: RequestInit & { duplex?: "half" },
+    request: BytesRequest,
+    signal: AbortSignal | undefined,
   ): Promise<Response> {
     requireActiveGrant(expiresAt);
     const destination = transferUrl(this.#http.resolveUrl(url));
-    init.signal?.throwIfAborted();
+    // Invalid grant headers are a local error, not an unknown outcome.
+    new Headers(request.headers);
+    signal?.throwIfAborted();
     let response: Response;
     try {
-      response = await this.#http.fetch(destination, { ...init, redirect: "error" });
-    } catch {
+      response = await this.#http.fetch(destination, {
+        method: "PUT",
+        ...request,
+        redirect: "error",
+        ...(signal ? { signal } : {}),
+      } as RequestInit);
+    } catch (cause) {
+      // A body fetch never read left nothing the service could accept.
+      const unsent = unsentBody(request.body);
+      if (unsent instanceof Error) throw unsent;
+      if (unsent && signal?.aborted) throw cause;
+      if (unsent)
+        throw new ConnectionError("File transfer could not be sent", {
+          cause,
+        });
       throw new OutcomeUnknownError(
         "File transfer outcome is unknown; inspect the original upload",
+        { cause },
       );
     }
     if (!response.ok) {
@@ -475,8 +512,7 @@ export class UserFiles {
       ],
       "File upload",
     );
-    if (!(input.bytes instanceof Uint8Array))
-      throw new TypeError("File bytes must be a Uint8Array");
+    requireBytes(input.bytes);
     const { bytes, ...metadata } = input;
     const checksum = digest(bytes);
     const options = {
@@ -507,18 +543,14 @@ export class UserFiles {
             throw new TiDBLinkError(
               "Inline upload grant does not match the complete file checksum",
             );
-          const response = await this.transfer(grant.url, grant.expiresAt, {
-            method: "PUT",
-            headers: {
-              ...grant.headers,
-              "content-length": String(bytes.byteLength),
-            },
-            body: bytesBody(bytes),
-            duplex: "half",
-            ...(input.signal ? { signal: input.signal } : {}),
-          });
+          const response = await this.transfer(
+            grant.url,
+            grant.expiresAt,
+            this.#http.bytesRequest(bytes, grant.headers),
+            input.signal,
+          );
           await response.body?.cancel();
-        } else await this.uploadContent(uploadId, bytes, options);
+        } else await this.#sendContent(uploadId, bytes, checksum, options);
       } else {
         const { partSize, totalParts } = upload;
         if (
@@ -536,13 +568,16 @@ export class UserFiles {
             (number - 1) * partSize,
             number * partSize,
           );
+          const partChecksum = digest(partBytes);
           const part = await this.presignPart(
             uploadId,
             number,
-            digest(partBytes).hex,
+            partChecksum.hex,
             options,
           );
-          parts.push(await this.uploadPart(part, partBytes, options));
+          parts.push(
+            await this.#sendPart(part, partBytes, partChecksum, options),
+          );
         }
       }
       return requireReady(
@@ -683,7 +718,7 @@ export class UserFiles {
     }
     if (
       bytes.byteLength !== grant.byteSize ||
-      (await digest(bytes)).hex !== grant.sha256
+      digest(bytes).hex !== grant.sha256
     )
       throw new TiDBLinkError(
         "Downloaded file does not match its complete size and checksum",
@@ -719,7 +754,7 @@ export class UserFiles {
     }
     if (
       content.bytes.byteLength !== file.byteSize ||
-      (await digest(content.bytes)).hex !== file.sha256
+      digest(content.bytes).hex !== file.sha256
     )
       throw new TiDBLinkError(
         "Downloaded file does not match its complete size and checksum",

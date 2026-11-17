@@ -112,7 +112,9 @@ cleanup. Application policies and K3 spending policy are separate concerns.
 Pass `fetch` to route every request through your own transport, for example a
 proxy, a custom HTTP agent, instrumentation or a test double. It carries all
 requests the client makes: JSON calls, event streams, and file transfers to
-presigned storage URLs (which never receive the API Key).
+presigned storage URLs (which never receive the API Key). File uploads give it
+the caller's `Uint8Array` as the body, not the one-shot stream the default
+fetch receives; see [File attachments](#file-attachments).
 
 ```js
 const organization = new OrganizationClient({
@@ -991,9 +993,14 @@ message text. `capabilities()` exposes current upload limits; a typed 413 requir
 reading them again and explicitly deciding whether to create another upload.
 
 `upload()`, `uploadContent()` and `uploadPart()` hash and send the bytes you pass
-without copying them, so a large file is held in memory once. Leave those bytes
-unchanged until the call settles; a change made meanwhile can make the sent
-bytes differ from their checksum.
+without copying them. Leave those bytes unchanged until the call settles; a
+change made meanwhile can make the sent bytes differ from their checksum. With
+the default fetch, the request body is a stream of your array, so Node.js's
+fetch does not copy the file either and a large file is held in memory once.
+Such a body can be sent only once, and the SDK never repeats a byte transfer.
+With a [custom `fetch`](#custom-transport), the body is your `Uint8Array`
+itself, which any fetch implementation accepts and can read again; whether it
+copies the bytes is up to that fetch, and Node.js's fetch does.
 
 For explicit recovery use `createUpload()` with the original metadata and key,
 `getUpload(uploadId)`, `uploadContent()`, `presignPart()` / `uploadPart()`,

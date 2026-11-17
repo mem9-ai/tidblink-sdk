@@ -2,7 +2,8 @@
 declare module "node:crypto" {
   interface Hash {
     update(data: Uint8Array): Hash;
-    digest(): Uint8Array;
+    /** A Node.js Buffer. */
+    digest(): Uint8Array & { toString(encoding: "hex" | "base64"): string };
   }
   export function createHash(algorithm: "sha256"): Hash;
 }

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, test } from "node:test";
-import { OrganizationClient, TiDBLinkApiError } from "../dist/index.js";
+import {
+  OrganizationClient,
+  OutcomeUnknownError,
+  TiDBLinkApiError,
+} from "../dist/index.js";
 
 const apiKey = "ti_org_file_" + "x".repeat(43);
 const servers = [];
@@ -466,30 +470,172 @@ test("download checks complete content and keeps expired grants unusable", async
   assert.equal(requests, 1);
 });
 
-test("inline content and parts send the caller's bytes as they are, without a copy", async () => {
+// A fake service and storage, as a fetch, for the three upload shapes.
+const uploadService = (shape) => {
   const sent = [];
-  const fetch = async (input, init) => {
+  const fetch = async (input, init = {}) => {
     const url = String(input);
-    if (init.body instanceof ReadableStream) {
-      const reader = init.body.getReader();
-      const chunks = [];
-      for (let next = await reader.read(); !next.done; next = await reader.read())
-        chunks.push(next.value);
-      sent.push({ url, init, chunks });
+    const request = { url, init };
+    if (init.body instanceof ReadableStream)
+      request.chunks = await Array.fromAsync(init.body);
+    sent.push(request);
+    if (url.endsWith("/uploads"))
+      return Response.json({
+        upload: {
+          uploadId: "shaped",
+          mode: shape === "multipart" ? "s3" : "tidb-link",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          expectedChecksumVerification: "whole",
+          file: { ...ready("shaped"), status: "uploading" },
+          ...(shape === "grant"
+            ? {
+                uploadUrl: {
+                  method: "PUT",
+                  url: "https://storage.example/inline?ticket=t",
+                  headers: {
+                    "content-digest":
+                      "sha-256=:ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=:",
+                  },
+                  expiresAt: "2099-01-01T00:00:00.000Z",
+                },
+              }
+            : {}),
+          ...(shape === "multipart" ? { partSize: 2, totalParts: 2 } : {}),
+        },
+      });
+    if (url.endsWith("/presign")) {
+      const number = Number(url.split("/").at(-2));
+      const { sha256 } = JSON.parse(init.body);
+      return Response.json({
+        part: {
+          number,
+          size: number === 1 ? 2 : 1,
+          url: `https://storage.example/part-${number}`,
+          headers: {
+            "x-amz-checksum-sha256": Buffer.from(sha256, "hex").toString(
+              "base64",
+            ),
+          },
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        },
+      });
     }
-    if (url.endsWith("/content"))
-      return Response.json({ file: ready("inline-copy") });
-    return new Response(null, { status: 200, headers: { etag: '"p1"' } });
+    if (url.startsWith("https://storage.example/"))
+      return new Response(null, { headers: { etag: '"p"' } });
+    return Response.json({ file: ready("shaped") });
   };
-  const user = new OrganizationClient({
+  // The requests that carried file bytes, with the bytes each should carry.
+  const byteRequests = (bytes) =>
+    sent
+      .filter(
+        (r) =>
+          r.url.endsWith("/content") ||
+          r.url.startsWith("https://storage.example/"),
+      )
+      .map((r, index) => ({
+        ...r,
+        expected:
+          shape === "multipart"
+            ? bytes.subarray(index * 2, index * 2 + 2)
+            : bytes,
+      }));
+  return { fetch, sent, byteRequests };
+};
+const sameView = (actual, expected) =>
+  actual instanceof Uint8Array &&
+  actual.buffer === expected.buffer &&
+  actual.byteOffset === expected.byteOffset &&
+  actual.byteLength === expected.byteLength;
+// Replace the global fetch the SDK uses by default for the rest of a test.
+const withGlobalFetch = async (fetch, run) => {
+  const original = globalThis.fetch;
+  globalThis.fetch = fetch;
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = original;
+  }
+};
+const shapes = ["content", "grant", "multipart"];
+
+test("with Node's fetch, upload() streams the caller's own bytes once with an explicit length", async () => {
+  for (const shape of shapes) {
+    const service = uploadService(shape);
+    const bytes = new TextEncoder().encode("abc");
+    const user = new OrganizationClient({
+      baseUrl: "https://core.example",
+      apiKey,
+    }).user("user_1");
+    const file = await withGlobalFetch(service.fetch, () =>
+      user.files.upload({
+        originalName: "note.txt",
+        bytes,
+        idempotencyKey: `stream-${shape}`,
+      }),
+    );
+    assert.equal(file.status, "ready");
+    const requests = service.byteRequests(bytes);
+    assert.equal(requests.length, shape === "multipart" ? 2 : 1, shape);
+    for (const { init, chunks, expected } of requests) {
+      assert(init.body instanceof ReadableStream, shape);
+      assert.equal(init.duplex, "half", shape);
+      assert.equal(init.method, "PUT", shape);
+      assert.equal(
+        new Headers(init.headers).get("content-length"),
+        String(expected.byteLength),
+        shape,
+      );
+      // One chunk: the caller's array, or a view of it, neither copied nor detached.
+      assert.equal(chunks.length, 1, shape);
+      assert(sameView(chunks[0], expected), shape);
+    }
+    if (shape !== "content")
+      for (const { init } of requests)
+        assert.equal(new Headers(init.headers).get("authorization"), null);
+    assert.equal(new TextDecoder().decode(bytes), "abc");
+  }
+});
+
+test("with an injected fetch, upload() and the explicit steps send the caller's array itself", async () => {
+  for (const shape of shapes) {
+    const service = uploadService(shape);
+    const bytes = new TextEncoder().encode("abc");
+    const user = new OrganizationClient({
+      baseUrl: "https://core.example",
+      apiKey,
+      fetch: service.fetch,
+    }).user("user_1");
+    await withGlobalFetch(
+      () => assert.fail("the injected fetch carries every request"),
+      () =>
+        user.files.upload({
+          originalName: "note.txt",
+          bytes,
+          idempotencyKey: `array-${shape}`,
+        }),
+    );
+    const requests = service.byteRequests(bytes);
+    assert.equal(requests.length, shape === "multipart" ? 2 : 1, shape);
+    for (const { init, expected } of requests) {
+      assert(sameView(init.body, expected), shape);
+      assert.equal("duplex" in init, false, shape);
+      assert.equal(
+        new Headers(init.headers).get("content-length"),
+        String(expected.byteLength),
+        shape,
+      );
+    }
+  }
+  const service = uploadService("content");
+  const files = new OrganizationClient({
     baseUrl: "https://core.example",
     apiKey,
-    fetch,
-  }).user("user_1");
+    fetch: service.fetch,
+  }).user("user_1").files;
   const content = new TextEncoder().encode("abc");
-  await user.files.uploadContent("inline-copy", content);
+  await files.uploadContent("shaped", content);
   const part = new TextEncoder().encode("ab");
-  await user.files.uploadPart(
+  await files.uploadPart(
     {
       number: 1,
       size: 2,
@@ -504,20 +650,91 @@ test("inline content and parts send the caller's bytes as they are, without a co
     },
     part,
   );
-  assert.equal(sent.length, 2);
-  for (const [request, bytes] of [
-    [sent[0], content],
-    [sent[1], part],
-  ]) {
-    // The one chunk is the caller's own array: the SDK neither copied nor detached it.
-    assert.equal(request.chunks.length, 1);
-    assert.equal(request.chunks[0], bytes);
-    assert.equal(bytes.byteLength, request.init.headers["content-length"] * 1);
-    assert.equal(request.init.duplex, "half");
-  }
+  assert.equal(service.sent[0].init.body, content);
   assert.equal(
-    sent[0].init.headers["content-digest"],
+    service.sent[0].init.headers["content-digest"],
     "sha-256=:ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=:",
   );
-  assert.equal(new TextDecoder().decode(content), "abc");
+  assert.equal(service.sent[1].init.body, part);
+  await assert.rejects(files.uploadContent("shaped", "abc"), /Uint8Array/);
+  await assert.rejects(files.uploadPart({}, [1, 2]), /Uint8Array/);
+  assert.equal(service.sent.length, 2);
+});
+
+test("a byte transfer that sent nothing fails as itself, not as an unknown outcome", async () => {
+  const closed = await serve(() => {});
+  const [server] = servers.splice(-1);
+  await new Promise((resolve) => server.close(resolve));
+  const user = new OrganizationClient({ baseUrl: closed, apiKey }).user(
+    "user_1",
+  );
+  // Node's fetch never reached the service, so it read none of the stream.
+  await assert.rejects(
+    user.files.uploadContent("inline", new TextEncoder().encode("abc")),
+    (error) =>
+      error.name === "ConnectionError" &&
+      !(error instanceof OutcomeUnknownError),
+  );
+  const part = {
+    number: 1,
+    size: 3,
+    url: closed + "/part",
+    headers: {
+      "x-amz-checksum-sha256": "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=",
+    },
+    expiresAt: "2099-01-01T00:00:00.000Z",
+  };
+  await assert.rejects(
+    user.files.uploadPart(part, Buffer.from("abc")),
+    (error) =>
+      error.name === "ConnectionError" &&
+      !(error instanceof OutcomeUnknownError),
+  );
+  // Grant headers fetch would refuse are a local TypeError.
+  await assert.rejects(
+    user.files.uploadPart(
+      { ...part, headers: { ...part.headers, "x-bad": "a\nb" } },
+      Buffer.from("abc"),
+    ),
+    TypeError,
+  );
+
+  // Bytes that change size before fetch reads them stop the body locally.
+  const sent = new TextEncoder().encode("abc");
+  const detaching = async (input, init) => {
+    if (!(init.body instanceof ReadableStream))
+      return Response.json({ file: ready("inline") });
+    structuredClone(sent.buffer, { transfer: [sent.buffer] });
+    await Array.fromAsync(init.body);
+  };
+  await withGlobalFetch(detaching, () =>
+    assert.rejects(
+      new OrganizationClient({ baseUrl: "https://core.example", apiKey })
+        .user("user_1")
+        .files.uploadContent("inline", sent),
+      (error) =>
+        error instanceof TypeError && /changed size/.test(error.message),
+    ),
+  );
+
+  // Once the service may have received the body, the outcome is unknown.
+  const dropping = await serve(async (req) => {
+    await readBytes(req);
+    req.socket.destroy();
+  });
+  await assert.rejects(
+    new OrganizationClient({ baseUrl: dropping, apiKey })
+      .user("user_1")
+      .files.uploadContent("inline", new TextEncoder().encode("abc")),
+    OutcomeUnknownError,
+  );
+  await assert.rejects(
+    new OrganizationClient({ baseUrl: dropping, apiKey })
+      .user("user_1")
+      .files.uploadPart(
+        { ...part, url: dropping + "/part" },
+        Buffer.from("abc"),
+      ),
+    OutcomeUnknownError,
+  );
 });
