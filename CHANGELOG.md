@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.4.0
+
+Stable release on the `latest` dist-tag for service
+[c21a5e3a](https://github.com/mem9-ai/agent-stack/commit/c21a5e3a091c938576ee3bb36cba72baf0e87022),
+OpenAPI SHA-256
+`0b7b19720f557a0b3385b297cf59207e94d6c087100192d4f65800642dc491ba`. It
+contains every change in 0.4.0-rc.0, 0.4.0-rc.1 and 0.4.0-rc.2 below; compared
+with 0.2.0, the previous stable release, the package is now `@tidblink/server`
+for Organization API Keys, creates Sessions directly from a Template and
+connects Sessions to this process over Backend Connections. Since 0.4.0-rc.2:
+
+- **Breaking:** the `lamp-backend.mjs` example uses one Template per lamp model.
+  `createLampBackend` takes `templates`, a map from lamp model to Template ID,
+  instead of `templateId`, and `bindDevice(appUserId, deviceId, model)` creates
+  the lamp's Session from its model's Template. The new
+  `changeModel(deviceId, model, { changeId? })` moves the Session to another
+  model's Template with `session.switchTemplate()`, keeping its history.
+
 ## 0.4.0-rc.2
 
 - Align with service

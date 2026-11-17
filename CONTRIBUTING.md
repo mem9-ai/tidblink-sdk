@@ -4,6 +4,7 @@
 
 - Node.js 22.12 or newer
 - npm 11 or newer
+- Python 3.11 or newer, for the Python SDK
 
 ## Local checks
 
@@ -43,6 +44,20 @@ of `CHANGELOG.md`. Releases follow [RELEASING.md](RELEASING.md).
 
 Open an issue before adding a new product area. The SDK intentionally exposes a
 narrow supported surface rather than every TiDB Link route.
+
+## Python SDK
+
+The Python SDK in `python/` follows the TypeScript SDK: the same supported
+surface, behaviour and service baseline, in Python's naming style. A change to
+the TypeScript SDK's public behaviour updates the Python SDK in the same change,
+or names the follow-up. Its checks:
+
+```sh
+cd python
+python -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pytest
+```
 
 ## Examples
 
