@@ -76,9 +76,10 @@ export interface ClientToolCallPayload {
   arguments: Record<string, unknown>;
   deadlineAt: string;
   /**
-   * Present when the call was published to the Session's executing Backend
-   * Connection attachment. Only that attachment executes it, after claiming it
-   * before this time; this event authorizes nothing.
+   * The end of the call's claim window. Only the Session's executing Backend
+   * Connection attachment executes the call, after claiming it before this
+   * time; this event authorizes nothing. Absent only on calls recorded before
+   * service c21a5e3a, which removed the per-Session subscription.
    */
   claimBy?: string;
 }

@@ -13,7 +13,7 @@ text submission, steering, cancellation, checkpoint retry, original-result waiti
 continuous progress, Client Tools, Session connections over Backend Connections,
 conversation history, file attachments,
 Realtime Model/Connection preparation, prerecorded audio and User usage reads for [service revision
-4305ef67](https://github.com/mem9-ai/agent-stack/commit/4305ef67daebf23c416badf806217a7c11dcef37).
+c21a5e3a](https://github.com/mem9-ai/agent-stack/commit/c21a5e3a091c938576ee3bb36cba72baf0e87022).
 
 Text commands return durable receipts independently of execution. Waiting reads the
 original command's outcome. The service has no Agent: a Session is created
@@ -99,8 +99,8 @@ client nor a media client.
 
 After Organization Key rotation or revocation, create a new `OrganizationClient`
 with fresh valid authority and select the same User. Existing handles retain their
-old credential. New old-authority requests, subscriptions,
-Realtime tokens and Organization-issued file tickets lose authority. Accepted
+old credential. New old-authority requests, Backend Connections (closed with
+4001), Realtime tokens and Organization-issued file tickets lose authority. Accepted
 Turns continue, and admitted file transfers may finish. Reconnect/obtain new
 grants with fresh authority and reconcile the original command before submitting
 new work. Another valid Key remains usable. Disabled Users cannot start new work;
@@ -400,7 +400,7 @@ The Handoff Turn summarizes the Session so far for the target Template. History
 reads return it as a Turn with `kind: "template_handoff"`, no `userMessage` and
 an empty `userMessages`; when it succeeds, its assistant Message is the summary.
 The service's
-[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/4305ef67daebf23c416badf806217a7c11dcef37/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
+[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/c21a5e3a091c938576ee3bb36cba72baf0e87022/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
 describes what the Session keeps across a switch (models, Billing Tag, Client
 Tools and creation options) and that cancelling the Handoff Turn fails the
 switch.
@@ -488,7 +488,7 @@ Set those five environment variables to run the installed example directly:
 `node node_modules/@tidblink/server/examples/send-message.mjs`. It prints only the
 final answer. Preserve the input across invocations; each new command identity
 can start new work. This slice replaces the obsolete response-owned NDJSON
-`streamTurn` API. Use the independent progress subscription below.
+`streamTurn` API. Follow progress over a Session connection, below.
 
 ## Progress and Session events
 
@@ -596,7 +596,11 @@ const lampTools = (deviceId: string): ClientToolHandlers => ({
   right to execute it and runs `run` only when the core grants it, so a call the
   core reports as not performed was never executed. A call that nobody claims
   within the core's claim window (5 seconds) is reported to the model as not
-  performed.
+  performed. So is a call made while no connection executes the Session: the
+  core reports it as not performed at once, never sends it, and records no
+  `requires_action` event for it; it appears only as a failed Operation step.
+  For a few seconds after a connection drops, the core may still count it as
+  executing, and such a call gets the claim window instead.
 - **Results.** A returned string is what the model receives; other values are
   sent as JSON. A thrown error becomes a failure whose message the model sees.
   A tool the connection has no handler for fails with a message saying so.
@@ -614,8 +618,9 @@ const lampTools = (deviceId: string): ClientToolHandlers => ({
 
 A result the core does not accept, for example after the call's deadline,
 reaches `onError` as a `ClientToolResultRefusedError` with the core's `reason`.
-Calls are answered only on the executing connection; the `claimBy` they carry in
-`requires_action` events marks them as such.
+Calls are executed only by the Session's executing connection; no REST command
+answers them. The `requires_action` event that records a call carries its
+`claimBy` but authorizes nothing.
 
 ### Messages and voice on a connection
 
@@ -945,7 +950,7 @@ reset; it is separate from `progress` and the final `assistant_message`.
 
 **The audio request owns execution's response.** Breaking its event loop, aborting
 its signal or losing the connection may request interruption. This differs from
-closing a text observation subscription. EOF alone is never reported as success.
+waiting for a text Turn, which never interrupts it. EOF alone is never reported as success.
 `AudioTurnStoppedError` preserves the Session and any already observed Turn ID;
 inspect `getTurn(turnId)` or saved history before deciding what to submit next.
 Audio accepts no `clientEventId`, has no ordinary text interaction receipt and
@@ -1156,7 +1161,7 @@ packed artifact in a clean ESM TypeScript consumer. To verify the packed SDK and
 its examples against the real service, use the service's Node.js 26 runtime, install its
 pinned dependencies, generate Prisma, build its Hardware contract and prepare its
 current schema in a **dedicated test database**. See the selected service's
-[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/4305ef67daebf23c416badf806217a7c11dcef37/docs/prisma-first-tidb-validation-and-rollout.md).
+[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/c21a5e3a091c938576ee3bb36cba72baf0e87022/docs/prisma-first-tidb-validation-and-rollout.md).
 
 ```sh
 AGENT_SERVICE_ROOT=/path/to/agent-stack \
@@ -1221,7 +1226,7 @@ They cover recorded input, malformed/unsupported recordings, supplier refusals,
 model failure, active-response interruption and the installed audio example.
 The public Session projection exposes the frozen Template digest but hides the
 stored creation options. Those snapshots and active-Turn model freezing also rely
-on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/4305ef67daebf23c416badf806217a7c11dcef37/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
+on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/c21a5e3a091c938576ee3bb36cba72baf0e87022/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
 prove those hidden values.
 Usage cases seed controlled facts and verify both public projections, exact filters,
 paging and authority without executing messages to manufacture billing data.

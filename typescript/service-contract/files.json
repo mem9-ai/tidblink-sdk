@@ -1,6 +1,6 @@
 {
-  "revision": "4305ef67daebf23c416badf806217a7c11dcef37",
-  "sourceOpenApiSha256": "6f5ff6f025eef80fbd9d5b80fb798e5db159aaa006e7d34866e9c3b6843dfe58",
+  "revision": "c21a5e3a091c938576ee3bb36cba72baf0e87022",
+  "sourceOpenApiSha256": "0b7b19720f557a0b3385b297cf59207e94d6c087100192d4f65800642dc491ba",
   "paths": {
     "/api/v1/org/users/{userId}/files": {
       "get": {

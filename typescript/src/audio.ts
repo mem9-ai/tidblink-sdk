@@ -56,9 +56,10 @@ export type AudioTurnEvent =
       { messageId: string; text: string; clarificationItem?: ClarificationItem }
     >
   /**
-   * Client Tool calls the audio Turn published. Answer them the way the
-   * Session's Client Tools are answered; this event authorizes nothing by
-   * itself.
+   * Client Tool calls the audio Turn published. The Session's executing
+   * connection claims, runs and answers them; this event authorizes nothing.
+   * A call made while no connection executes the Session is not performed and
+   * gets no frame.
    */
   | AudioEnvelope<"client_tool_calls", { calls: ClientToolCallPayload[] }>
   | AudioEnvelope<"turn_error", TurnFailure>

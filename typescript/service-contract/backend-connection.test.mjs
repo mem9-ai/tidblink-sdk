@@ -92,7 +92,7 @@ test("attach, detach and the core's connection notices keep the shape the pool u
   assert.match(schema["x-error-codes"]["-32603"], /retry/);
 });
 
-test("session.event carries the subscription's envelope with its cursor", () => {
+test("session.event carries the Session event envelope with its cursor", () => {
   const event = params("SessionEvent");
   assert.deepEqual(event.required, ["sessionId", "cursor", "event"]);
   assert.deepEqual(event.properties.event.required, [
@@ -117,6 +117,11 @@ test("tool.call, tool.claim and tool.result keep the shape the executor uses", (
     "deadlineAt",
   ]);
   assert.match(definitions.ToolCall.description, /deduplicate by callId/);
+  // The README promises such a call is reported not performed at once.
+  assert.match(
+    definitions.ToolCall.description,
+    /A call published while the Session had no executing attachment is not delivered, at once, and is never sent here/,
+  );
   assert.deepEqual(params("ToolClaimRequest").required, ["callId"]);
   assert.match(definitions.ToolClaimRequest.description, /submit an error result/);
   const claim = definitions.ToolClaimResponse.properties.result.oneOf;
@@ -164,4 +169,8 @@ test("ping is a request the core answers at once, and Session idle reaches conne
   assert.match(definitions.PingRequest.description, /answers at once/);
   assert.deepEqual(definitions.PingResponse.properties.result.required, ["time"]);
   assert.match(definitions.SessionSendRequest.description, /agent\.session\.idle/);
+  assert.match(
+    params("SessionEvent").properties.event.description,
+    /agent\.session\.idle follows the terminal events of a Turn once the Session has released it; wait for it before session\.send, an audio Turn or a Template switch/,
+  );
 });

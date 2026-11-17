@@ -36,6 +36,11 @@ test("prerecorded audio keeps its multipart request and distinct response-owned 
   assert.equal(multipart.encoding.billingTag.contentType, "application/json");
   assert.equal(multipart.schema.properties.billingTag.nullable, true);
   const success = operation.responses["201"];
+  // Every call carries claimBy, and none is framed without an executing connection.
+  assert.match(
+    success.description,
+    /Its client_tool_calls frames carry claimBy: only the Session’s executing Backend Connection attachment executes and answers them; a call published while the Session has none is not performed and gets no frame/,
+  );
   // The Organization route names TurnStreamEvent only in prose; it omits the
   // x-sse-event-schema link that the retired User route carried.
   assert.match(

@@ -449,8 +449,11 @@ test("the core Agent is gone from the selected contract", () => {
   }
 });
 
-test("the Session event stream documents agent.session.idle as the release before the next Turn", () => {
-  const text = JSON.stringify(document.paths[`${sessionPath}/events`].get).replace(/\\n|\s+/g, " ");
-  assert.match(text, /agent\.session\.idle/);
-  assert.match(text, /Wait for it before submitting the next message, audio Turn or Template switch/);
+test("the per-Session subscription and REST Client Tool answers are gone", () => {
+  // Session events, including agent.session.idle, reach only Backend Connections.
+  assert.equal(document.paths[`${sessionPath}/events`].get, undefined);
+  const commands = JSON.stringify(
+    document.components.schemas.SessionEventOpenApiDto,
+  );
+  assert.doesNotMatch(commands, /agent\.session\.input\.client_tool_output/);
 });
