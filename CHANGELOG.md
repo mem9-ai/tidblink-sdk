@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Align with service
+  [c21a5e3a](https://github.com/mem9-ai/agent-stack/commit/c21a5e3a091c938576ee3bb36cba72baf0e87022),
+  which removes the per-Session event subscription and answering Client Tool
+  calls over REST (`agent.session.input.client_tool_output`). The SDK used
+  neither. A Client Tool call made while no Session connection executes the
+  Session is now reported to the model as not performed at once, instead of
+  waiting out its 60-second deadline; it reaches no connection, so no `run`
+  handler sees it. Every new call carries `claimBy`.
 - `files.upload()`, `uploadContent()` and `uploadPart()` hash and send the
   caller's bytes in place instead of copying them: the SDK and Node.js fetch
   used to hold about three more copies of a file while it uploaded. Leave the

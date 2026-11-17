@@ -1,6 +1,6 @@
 {
-  "revision": "4305ef67daebf23c416badf806217a7c11dcef37",
-  "sourceOpenApiSha256": "6f5ff6f025eef80fbd9d5b80fb798e5db159aaa006e7d34866e9c3b6843dfe58",
+  "revision": "c21a5e3a091c938576ee3bb36cba72baf0e87022",
+  "sourceOpenApiSha256": "0b7b19720f557a0b3385b297cf59207e94d6c087100192d4f65800642dc491ba",
   "paths": {
     "/api/v1/org/users/{userId}/sessions/{id}/turns/audio": {
       "post": {
@@ -59,7 +59,7 @@
         },
         "responses": {
           "201": {
-            "description": "Audio Turn outside ordinary JSON text input identity/recovery guarantees. The owning response uses SSE frames whose event name and JSON data identify the TurnStreamEvent, with comment keepalives; turn_started may omit inputId. An ordinary upstream disconnect requests interruption. Rotation or revocation closes this response without canceling an accepted Turn; recover its result using fresh authority. Cancel an owned live Turn through POST events with a stable clientEventId and its exact turnId. The transcript is the Turn input, so the Turn freezes the Session Client Tool set as a text Turn does; answer each client_tool_calls frame with agent.session.input.client_tool_output, except calls that carry claimBy, which only the Session’s executing Backend Connection attachment executes and answers.",
+            "description": "Audio Turn outside ordinary JSON text input identity/recovery guarantees. The owning response uses SSE frames whose event name and JSON data identify the TurnStreamEvent, with comment keepalives; turn_started may omit inputId. An ordinary upstream disconnect requests interruption. Rotation or revocation closes this response without canceling an accepted Turn; recover its result using fresh authority. Cancel an owned live Turn through POST events with a stable clientEventId and its exact turnId. The transcript is the Turn input, so the Turn freezes the Session Client Tool set as a text Turn does. Its client_tool_calls frames carry claimBy: only the Session’s executing Backend Connection attachment executes and answers them; a call published while the Session has none is not performed and gets no frame.",
             "headers": {
               "Cache-Control": {
                 "required": true,
@@ -973,7 +973,7 @@
               },
               "payload": {
                 "type": "object",
-                "description": "The Client Tool calls of one model step, published together; answer each with agent.session.input.client_tool_output before its deadline, except a call with claimBy.",
+                "description": "The Client Tool calls of one model step, published together to the Session's executing Backend Connection attachment, which claims each with tool.claim before claimBy and answers it with tool.result. No REST command answers them.",
                 "required": [
                   "calls"
                 ],
@@ -1004,7 +1004,7 @@
                           "format": "date-time"
                         },
                         "claimBy": {
-                          "description": "Present when the call was published to the Session's executing Backend Connection attachment. Only that attachment executes it, after tool.claim succeeds before this time, and answers it with tool.result.",
+                          "description": "The end of the call's claim window. Only the Session's executing Backend Connection attachment executes the call, after tool.claim succeeds before this time, and answers it with tool.result. Absent only on calls published before the per-Session subscription was removed.",
                           "type": "string",
                           "format": "date-time"
                         }

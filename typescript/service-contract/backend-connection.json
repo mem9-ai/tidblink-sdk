@@ -1,6 +1,6 @@
 {
-  "revision": "4305ef67daebf23c416badf806217a7c11dcef37",
-  "sourceSchemaSha256": "8a24f59d26c23ee945a37eded23361e7a714f551bc44eb647a22765ac5023ac5",
+  "revision": "c21a5e3a091c938576ee3bb36cba72baf0e87022",
+  "sourceSchemaSha256": "2254dbcb243a9efd120d18d0efc8ac418b6635cdd955e42a7b1c8645826e09d5",
   "schema": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "tidb-link.backend.v1",
@@ -336,7 +336,7 @@
         }
       },
       "ToolResultRequest": {
-        "description": "Submit a claimed call's result: output, or error when execution failed. Any Backend Connection of the call's Organization may submit it, so a result survives a connection change. The first valid result settles the call; submitting the same result again answers accepted: true, a different one is refused. Its accepted result appears in the Session's interaction list under the input ID tool.result#<callId>, which no REST clientEventId can take or look up. A Key or Organization that is no longer valid is refused with error -32000, reason authentication_required, and the connection closes with 4001; submit the result again through a connection of a valid Key. Lengths count UTF-16 code units, as the REST client_tool_output body does; JSON Schema maxLength counts code points.",
+        "description": "Submit a claimed call's result: output, or error when execution failed. Any Backend Connection of the call's Organization may submit it, so a result survives a connection change. The first valid result settles the call; submitting the same result again answers accepted: true, a different one is refused. Its accepted result appears in the Session's interaction list under the input ID tool.result#<callId>, which no REST clientEventId can take or look up. A Key or Organization that is no longer valid is refused with error -32000, reason authentication_required, and the connection closes with 4001; submit the result again through a connection of a valid Key. Lengths count UTF-16 code units; JSON Schema maxLength counts code points.",
         "type": "object",
         "required": [
           "jsonrpc",
@@ -793,7 +793,7 @@
                 "type": "string"
               },
               "event": {
-                "description": "The envelope a data frame of the per-Session event subscription (GET /api/v1/org/users/{userId}/sessions/{id}/events?stream=true) carries: type (agent.session.turn.*, agent.session.realtime.*, agent.session.template_switch.*, agent.session.idle), sessionId, turnId, createdAt and data. agent.session.idle follows the terminal events of a Turn once the Session has released it; wait for it before session.send, an audio Turn or a Template switch.",
+                "description": "The Session event envelope: type (agent.session.turn.*, agent.session.realtime.*, agent.session.template_switch.*, agent.session.idle), sessionId, turnId, createdAt and data. agent.session.idle follows the terminal events of a Turn once the Session has released it; wait for it before session.send, an audio Turn or a Template switch.",
                 "type": "object",
                 "required": [
                   "type",
@@ -828,7 +828,7 @@
         }
       },
       "ToolCall": {
-        "description": "One Client Tool call published to the Session's executing attachment (ADR 0109). Execute it only after tool.claim answers claimed: true; the requires_action Session event that records the same calls authorizes nothing. The core sends a call to the attachment that was executing when the call was published, and to a later executing attachment of the Session (after a reconnect or a move to another connection) while the call is still unclaimed and its claim window open; a call whose claim window has just passed, or that an earlier attachment generation claimed, may still arrive, and its claim is refused; it sends each call at most once per attachment, so deduplicate by callId. An attachment superseded moments earlier may still receive a call; its claim is refused. Calls published while the Session had no executing attachment follow the per-Session subscription and are never sent here. If its Turn ends first, an unclaimed call is reported not performed and a claimed one without a result unknown.",
+        "description": "One Client Tool call published to the Session's executing attachment (ADR 0109). Execute it only after tool.claim answers claimed: true; the requires_action Session event that records the same calls authorizes nothing. The core sends a call to the attachment that was executing when the call was published, and to a later executing attachment of the Session (after a reconnect or a move to another connection) while the call is still unclaimed and its claim window open; a call whose claim window has just passed, or that an earlier attachment generation claimed, may still arrive, and its claim is refused; it sends each call at most once per attachment, so deduplicate by callId. An attachment superseded moments earlier may still receive a call; its claim is refused. A call published while the Session had no executing attachment is not delivered, at once, and is never sent here. If its Turn ends first, an unclaimed call is reported not performed and a claimed one without a result unknown.",
         "type": "object",
         "required": [
           "jsonrpc",
@@ -1004,7 +1004,7 @@
                     "const": false
                   },
                   "reason": {
-                    "description": "call_not_found: no such call in the Key's Organization, or one published while its Session had no executing attachment. superseded: this connection does not hold the Session's current executing attachment, or another attachment generation claimed the call. claim_window_closed: claimBy passed without a claim; the call was not performed. call_settled: the core already decided the call's outcome.",
+                    "description": "call_not_found: no such call in the Key's Organization, or one published without an executing attachment before the per-Session subscription was removed. superseded: this connection does not hold the Session's current executing attachment, or another attachment generation claimed the call. claim_window_closed: claimBy passed without a claim; the call was not performed. call_settled: the core already decided the call's outcome, including a call published while its Session had no executing attachment, which is not delivered at once.",
                     "type": "string",
                     "enum": [
                       "call_not_found",
@@ -1065,7 +1065,7 @@
                     "const": false
                   },
                   "reason": {
-                    "description": "call_not_found: no such call in the Key's Organization or visible to the Key, or one published while its Session had no executing attachment (answer those through the per-Session subscription's REST input). not_claimed: no attachment claimed the call. call_settled: the call already has an outcome, from an earlier different result, its deadline or the end of its Turn.",
+                    "description": "call_not_found: no such call in the Key's Organization or visible to the Key, or one published without an executing attachment before the per-Session subscription was removed. not_claimed: no attachment claimed the call. call_settled: the call already has an outcome, from an earlier different result, its deadline, the end of its Turn or its publication while its Session had no executing attachment.",
                     "type": "string",
                     "enum": [
                       "call_not_found",

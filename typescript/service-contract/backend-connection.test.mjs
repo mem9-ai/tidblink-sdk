@@ -164,4 +164,8 @@ test("ping is a request the core answers at once, and Session idle reaches conne
   assert.match(definitions.PingRequest.description, /answers at once/);
   assert.deepEqual(definitions.PingResponse.properties.result.required, ["time"]);
   assert.match(definitions.SessionSendRequest.description, /agent\.session\.idle/);
+  assert.match(
+    params("SessionEvent").properties.event.description,
+    /agent\.session\.idle follows the terminal events of a Turn once the Session has released it; wait for it before session\.send, an audio Turn or a Template switch/,
+  );
 });
