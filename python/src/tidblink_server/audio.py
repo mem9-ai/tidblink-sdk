@@ -17,6 +17,7 @@ from typing import Any, Literal, NotRequired, TypedDict, Union
 import httpx
 
 from ._http import (
+    utf16_length,
     _BODY_CHUNK,
     _REQUEST_ID,
     Bytes,
@@ -204,11 +205,6 @@ class AudioTurnStoppedError(OutcomeUnknownError):
 # --- Request body ------------------------------------------------------------
 
 
-def _utf16_length(text: str) -> int:
-    """The length JavaScript reports for ``text``."""
-    return len(text) + sum(1 for character in text if ord(character) > 0xFFFF)
-
-
 class _MultipartBody(BytesBody):
     """A multipart body that sends the recording's bytes in place, between its framing."""
 
@@ -245,7 +241,7 @@ def _multipart(
         raise ValueError("Audio requires 1 byte to 25 MiB of prerecorded data")
     if not isinstance(filename, str):
         raise TypeError("Audio requires a filename of 1-255 characters")
-    if not filename.strip() or _utf16_length(filename) > 255:
+    if not filename.strip() or utf16_length(filename) > 255:
         raise ValueError("Audio requires a filename of 1-255 characters")
     try:
         encoded_filename = (

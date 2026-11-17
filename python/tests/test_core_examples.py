@@ -188,7 +188,7 @@ def test_the_send_message_example_prints_the_answer_or_the_failure() -> None:
     assert answered.returncode == 0, answered.stderr
     assert answered.stdout == "SDK final answer.\n"
     assert failed.returncode == 1
-    assert "requires a stable idempotency_key" in failed.stderr
+    assert "requires a stable client_event_id" in failed.stderr
 
 
 # --- control_turn -----------------------------------------------------------------

@@ -29,7 +29,7 @@ async def submit_turn_command(
     turn_id: str,
     request_id: str | None = None,
 ) -> SessionInteraction | RetryReceipt:
-    require_creation_key(client_event_id, "Turn command")
+    require_creation_key(client_event_id, "Turn command", "client_event_id")
     if not isinstance(turn_id, str) or not turn_id or len(turn_id) > 64:
         raise (ValueError if isinstance(turn_id, str) else TypeError)("Turn command requires a turn_id containing 1-64 characters")
     try:

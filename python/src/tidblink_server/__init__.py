@@ -14,6 +14,7 @@ from .session_connection import (
     SessionConnection,
     SessionConnectionEnd,
     ClientToolHandler,
+    ClientToolHandlers,
     ClientToolCallContext,
     ClientToolResultRefusedError,
 )
@@ -151,6 +152,15 @@ from .errors import (
     TurnWaitTimeoutError,
 )
 from .history import (
+    OperationRecord,
+    OperationStatus,
+    RealtimeResponseKind,
+    SessionRealtimeEvent,
+    SessionTemplateSwitch,
+    SessionTimelineEntry,
+    TurnFailure,
+    TurnStatus,
+    TurnUserFile,
     BillingTag,
     ClarificationItem,
     MessageRecord,
@@ -168,13 +178,17 @@ from .realtime import (
     RealtimeAudioFormats,
     RealtimeConnectGrant,
     RealtimeConnection,
+    RealtimeEndpointingMode,
+    RealtimeLanguage,
     RealtimeModel,
     RealtimeModelCatalog,
     RealtimeModelSelection,
     RealtimeOpenAudio,
+    RealtimeOpusAudioFormat,
+    RealtimePcm16AudioFormat,
     RealtimeVoiceSetting,
 )
-from .session import Session, SessionRecord, SessionSandboxSelection
+from .session import SelectableSessionModel, Session, SessionModel, SessionRecord, SessionSandboxSelection
 from .template_switch import TemplateSwitchReceipt, TemplateSwitchStatus
 from .turn import TurnResult
 from .user import AgentModelCatalog, AgentTemplate, AgentTemplatePage, EndUserClient, SessionPage
@@ -349,4 +363,20 @@ __all__ = [
     "TemplateSwitchEventData",
     "SessionIdleEvent",
     "as_known_session_event",
+    "ClientToolHandlers",
+    "OperationRecord",
+    "OperationStatus",
+    "RealtimeResponseKind",
+    "SessionRealtimeEvent",
+    "SessionTemplateSwitch",
+    "SessionTimelineEntry",
+    "TurnFailure",
+    "TurnStatus",
+    "TurnUserFile",
+    "RealtimeEndpointingMode",
+    "RealtimeLanguage",
+    "RealtimeOpusAudioFormat",
+    "RealtimePcm16AudioFormat",
+    "SelectableSessionModel",
+    "SessionModel",
 ]

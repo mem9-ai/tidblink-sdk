@@ -63,6 +63,11 @@ if TYPE_CHECKING:
     from .session_connection import ClientToolHandler, SessionConnection
 
 
+#: Model IDs come from the deployment catalog, including newly published models.
+SelectableSessionModel = str
+SessionModel = str
+
+
 class SessionSandboxSelection(TypedDict, total=False):
     """The Sandbox a Session runs in, chosen at creation."""
 
@@ -512,7 +517,11 @@ class Session:
         poll_interval: float | None = None,
         request_id: str | None = None,
     ) -> TurnResult:
-        """Submit a message and wait for its result."""
+        """Submit a message and wait for its result.
+
+        ``request_id`` identifies the submission; the reads that wait for the
+        result send their own, as ``wait_for_result`` does without one.
+        """
         validate_wait_options(timeout, poll_interval)
         accepted = await self.submit_message(
             client_event_id=client_event_id,
@@ -522,9 +531,7 @@ class Session:
             billing_tag=billing_tag,
             request_id=request_id,
         )
-        return await self.wait_for_result(
-            accepted["inputId"], timeout=timeout, poll_interval=poll_interval, request_id=request_id
-        )
+        return await self.wait_for_result(accepted["inputId"], timeout=timeout, poll_interval=poll_interval)
 
 
 async def create_session(

@@ -16,6 +16,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from ._http import (
+    utf16_length,
     Bytes,
     HttpClient,
     byte_view,
@@ -387,10 +388,10 @@ class UserFiles:
             raise TypeError(message)
         if (
             not original_name
-            or len(original_name) > 255
+            or utf16_length(original_name) > 255
             or byte_size < 0
             or not _SHA256_HEX.fullmatch(sha256)
-            or (content_type is not None and len(content_type) > 255)
+            or (content_type is not None and utf16_length(content_type) > 255)
         ):
             raise ValueError(message)
         result = await self._http.post_response(

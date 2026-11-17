@@ -130,7 +130,7 @@ async def submit_message(
     data: dict[str, Any],
     request_id: str | None = None,
 ) -> SessionInteraction:
-    require_creation_key(client_event_id, "A message")
+    require_creation_key(client_event_id, "A message", "client_event_id")
     try:
         result = await http.post_response(
             f"/sessions/{segment(session_id)}/events",
@@ -185,7 +185,7 @@ async def wait_for_result(
     request_id: str | None = None,
 ) -> TurnResult:
     timeout, poll_interval = validate_wait_options(timeout, poll_interval)
-    require_creation_key(input_id, "Waiting for a result")
+    require_creation_key(input_id, "Waiting for a result", "input_id")
     seen: dict[str, str] = {}
     deadline = asyncio.timeout(timeout)
     try:

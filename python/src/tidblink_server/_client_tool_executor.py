@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
 
 from .errors import BackendConnectionClosedError, BackendRequestError, TiDBLinkError
+from ._http import utf16_length
 
 if TYPE_CHECKING:
     from ._backend_pool import BackendConnectionPool, BackendLink
@@ -104,13 +105,13 @@ def _parse_call(params: Mapping[str, Any]) -> _ToolCall | None:
     )
 
 
-def _utf16_length(text: str) -> int:
-    # The core counts characters as JavaScript does.
-    return len(text) + sum(1 for char in text if ord(char) > 0xFFFF)
-
-
 def _truncate(text: str, limit: int) -> str:
-    return text if len(text) <= limit else f"{text[: limit - 1]}…"
+    """At most ``limit`` UTF-16 code units, as the core counts them, ending with an ellipsis when cut."""
+    if utf16_length(text) <= limit:
+        return text
+    units = text.encode("utf-16-le")[: 2 * (limit - 1)]
+    # A pair cut in half is dropped rather than sent as a lone surrogate.
+    return f"{units.decode('utf-16-le', errors='ignore')}…"
 
 
 def _output_of(value: Any) -> dict[str, Any]:
@@ -124,7 +125,7 @@ def _output_of(value: Any) -> dict[str, Any]:
             output = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
         except (TypeError, ValueError) as cause:
             return {"error": {"message": f"The tool returned a value that is not JSON: {cause}"}}
-    if _utf16_length(output) > OUTPUT_MAX:
+    if utf16_length(output) > OUTPUT_MAX:
         return {"error": {"message": f"The tool output exceeds {OUTPUT_MAX} characters"}}
     return {"output": output}
 

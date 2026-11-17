@@ -92,7 +92,7 @@ async def send_over_connection(
     """
     if client_event_id is None:
         client_event_id = str(uuid.uuid4())
-    require_creation_key(client_event_id)
+    require_creation_key(client_event_id, "A message", "client_event_id")
     if on_progress is not None and not callable(on_progress):
         raise TypeError("on_progress must be callable")
     data = message_data(

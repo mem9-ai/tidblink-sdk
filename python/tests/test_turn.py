@@ -330,3 +330,16 @@ async def test_turn_waiting_stays_bound_to_its_submitted_identity() -> None:
     assert result.input_id == "input_1"
     reads = [call.path for call in service.calls if call.method == "GET"]
     assert reads[0] == f"{SESSION_PATH}/interactions/input_1"
+
+
+async def test_turn_sends_its_request_id_only_with_the_submission() -> None:
+    def handler(request, service):
+        if request.method == "POST":
+            return json_response({"interaction": final_receipt()}, 202)
+        return answering(saved_turn())(request, service)
+
+    session, service = session_for(handler)
+    await session.turn(client_event_id="input_1", text="Hello", request_id="http_submit")
+    post, *reads = service.calls
+    assert post.headers["x-request-id"] == "http_submit"
+    assert reads and all(call.headers["x-request-id"] != "http_submit" for call in reads)

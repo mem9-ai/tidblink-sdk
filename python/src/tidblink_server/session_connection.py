@@ -67,6 +67,10 @@ class ClientToolHandler:
     run: Callable[[dict[str, Any], ClientToolCallContext], Any]
 
 
+#: The Session's Client Tools by name: ``ClientToolHandler``s, or mappings with
+#: ``description``, ``parameters`` and ``run``.
+ClientToolHandlers = Mapping[str, "ClientToolHandler | Mapping[str, Any]"]
+
 Callback = Callable[[Any], Awaitable[None] | None]
 
 

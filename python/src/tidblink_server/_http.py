@@ -58,11 +58,16 @@ def pagination_query(limit: int | None = None, cursor: str | None = None) -> str
     return query_string({"limit": limit, "cursor": cursor})
 
 
-def require_creation_key(value: object, label: str = "Creation") -> str:
-    """Check a stable command key; ``label`` names the operation in the error."""
+def utf16_length(text: str) -> int:
+    """The length JavaScript reports for ``text``, in UTF-16 code units, which the service's limits count."""
+    return len(text) + sum(1 for character in text if ord(character) > 0xFFFF)
+
+
+def require_creation_key(value: object, label: str = "Creation", field: str = "idempotency_key") -> str:
+    """Check a stable command key; ``label`` names the operation and ``field`` the parameter in the error."""
     if not isinstance(value, str) or not _CREATION_KEY.fullmatch(value):
         error = TypeError if not isinstance(value, str) else ValueError
-        raise error(f"{label} requires a stable idempotency_key (1-128 safe characters)")
+        raise error(f"{label} requires a stable {field} (1-128 safe characters)")
     return value
 
 
@@ -71,7 +76,7 @@ def require_template_id(value: object, label: str) -> str:
     if (
         not isinstance(value, str)
         or not value
-        or len(value) > 64
+        or utf16_length(value) > 64
         or value.strip() != value
     ):
         error = TypeError if not isinstance(value, str) else ValueError
