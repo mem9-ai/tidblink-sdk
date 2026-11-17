@@ -145,6 +145,7 @@ export type {
   RealtimeTurnRecord,
   TemplateHandoffTurnRecord,
   TurnPage,
+  TurnState,
   TurnStatus,
   TurnUserFile,
   TurnFailure,

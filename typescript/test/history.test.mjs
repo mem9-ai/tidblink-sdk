@@ -75,6 +75,33 @@ test("history preserves Turn pages and selected Full Agent details", async (cont
   ]);
 });
 
+test("getTurnState returns the Turn with when a stop was requested", async (context) => {
+  const calls = [];
+  let body = { turn, stopRequestedAt: null };
+  const session = await serve(context, (req, res) => {
+    calls.push(req.url);
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(body));
+  });
+  assert.deepEqual(await session.getTurnState("turn_1"), {
+    turn,
+    stopRequestedAt: null,
+  });
+  body = { turn, stopRequestedAt: createdAt };
+  assert.deepEqual(await session.getTurnState("turn_1"), {
+    turn,
+    stopRequestedAt: createdAt,
+  });
+  assert.deepEqual(calls, [
+    "/api/v1/org/users/user_1/sessions/session%2F1/turns/turn_1",
+    "/api/v1/org/users/user_1/sessions/session%2F1/turns/turn_1",
+  ]);
+  body = { turn };
+  await assert.rejects(session.getTurnState("turn_1"), /no Turn stop state/);
+  body = { turn: { ...turn, id: "turn_2" }, stopRequestedAt: null };
+  await assert.rejects(session.getTurnState("turn_1"), /different Turn/);
+});
+
 test("interaction pagination and exact command reconciliation preserve durable original receipts", async (context) => {
   const calls = [];
   const page = {
