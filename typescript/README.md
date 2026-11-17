@@ -23,10 +23,11 @@ an explicitly selected End User; User API Keys are not supported.
 
 ## Quick start
 
-Install an exact published version. Prereleases are on the `next` dist-tag:
+Install an exact published version. Stable versions are on the `latest`
+dist-tag and prereleases on `next`:
 
 ```sh
-npm install --save-exact @tidblink/server@next
+npm install --save-exact @tidblink/server
 ```
 
 An application backend uses its Organization API Key (`ti_org_…`) and explicitly
