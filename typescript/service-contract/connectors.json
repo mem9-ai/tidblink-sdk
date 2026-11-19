@@ -1,14 +1,15 @@
 {
-  "revision": "501eee1c608111c1f04ac9311b9c55ed90be8170",
-  "sourceOpenApiSha256": "29f5ea39cc310ce69ece6b2351fac64bba015c07e83dd11a532be3e073feb96b",
+  "revision": "07d1f9c85c0fedd729c76c4cb4a48485d139c8ff",
+  "sourceOpenApiSha256": "74215cefcabb18e915fa6a13d4a4dbcbd3720aa1eb5b522e0fd3e83d2b6ad131",
   "paths": {
     "/api/v1/org/connectors": {
       "get": {
+        "description": "Every Connector an Application Server declared on a Backend Connection with connector.serve, whether or not a connection serves it now.\n\nAuthorization: OrganizationApiKey; persisted credentials determine Organization scope; no End User scope. User API Keys do not read Connectors; Application Servers declare them on a Backend Connection with connector.serve.",
         "operationId": "ConnectorsController_list",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Connector registrations.",
+            "description": "Connectors.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22,18 +23,12 @@
                       "type": "array",
                       "items": {
                         "type": "object",
+                        "description": "A Connector declared on a Backend Connection with connector.serve. Its displayName is the declared Connector name; Templates reference it by connectorId as tools.mcp[].serverId.",
                         "required": [
                           "connectorId",
-                          "organizationId",
                           "displayName",
-                          "endpointUrl",
-                          "endpointVersion",
-                          "transport",
-                          "status",
-                          "connectorVersion",
                           "createdAt",
-                          "updatedAt",
-                          "observation"
+                          "updatedAt"
                         ],
                         "additionalProperties": false,
                         "properties": {
@@ -41,40 +36,8 @@
                             "type": "string",
                             "pattern": "^conn_[a-f0-9-]{36}$"
                           },
-                          "organizationId": {
-                            "type": "string"
-                          },
                           "displayName": {
                             "type": "string"
-                          },
-                          "endpointUrl": {
-                            "type": "string",
-                            "maxLength": 2048,
-                            "description": "HTTPS endpoint for a streamable_http Connector; empty for a tunnel or backend_connection Connector, which the platform never dials."
-                          },
-                          "endpointVersion": {
-                            "type": "integer",
-                            "minimum": 1
-                          },
-                          "transport": {
-                            "type": "string",
-                            "enum": [
-                              "streamable_http",
-                              "tunnel",
-                              "backend_connection"
-                            ],
-                            "description": "backend_connection: created by connector.serve on a Backend Connection, active from its first declaration, with no observation; update, activate, refresh-catalog and deactivate answer 409 for it."
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": [
-                              "inactive",
-                              "active"
-                            ]
-                          },
-                          "connectorVersion": {
-                            "type": "integer",
-                            "minimum": 1
                           },
                           "createdAt": {
                             "type": "string",
@@ -83,42 +46,6 @@
                           "updatedAt": {
                             "type": "string",
                             "format": "date-time"
-                          },
-                          "observation": {
-                            "type": "object",
-                            "nullable": true,
-                            "required": [
-                              "era",
-                              "protocolVersion",
-                              "endpointVersion",
-                              "probedAt",
-                              "expiresAt"
-                            ],
-                            "additionalProperties": false,
-                            "properties": {
-                              "era": {
-                                "type": "string",
-                                "enum": [
-                                  "modern",
-                                  "legacy"
-                                ]
-                              },
-                              "protocolVersion": {
-                                "type": "string"
-                              },
-                              "endpointVersion": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
-                              "probedAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "expiresAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              }
-                            }
                           }
                         }
                       }
@@ -128,18 +55,8 @@
               }
             }
           },
-          "400": {
-            "description": "Invalid Connector request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "401": {
-            "description": "authentication_required: missing credentials, or the Organization API Key was revoked or rotated before the change committed.",
+            "description": "authentication_required: missing or invalid credentials.",
             "content": {
               "application/json": {
                 "schema": {
@@ -164,11 +81,10 @@
             "OrganizationApiKey": []
           }
         ],
-        "summary": "List the Organization’s Connector registrations.",
+        "summary": "List the Organization’s Connectors.",
         "tags": [
           "Connectors"
-        ],
-        "description": "Authorization: OrganizationApiKey; persisted credentials determine Organization scope; no End User scope. Changes are attributed to the authentic Organization API Key; User API Keys neither manage nor read Connectors."
+        ]
       }
     },
     "/api/v1/org/connectors/{connectorId}": {
@@ -187,23 +103,17 @@
         ],
         "responses": {
           "200": {
-            "description": "Connector registration.",
+            "description": "Connector.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "A Connector declared on a Backend Connection with connector.serve. Its displayName is the declared Connector name; Templates reference it by connectorId as tools.mcp[].serverId.",
                   "required": [
                     "connectorId",
-                    "organizationId",
                     "displayName",
-                    "endpointUrl",
-                    "endpointVersion",
-                    "transport",
-                    "status",
-                    "connectorVersion",
                     "createdAt",
-                    "updatedAt",
-                    "observation"
+                    "updatedAt"
                   ],
                   "additionalProperties": false,
                   "properties": {
@@ -211,40 +121,8 @@
                       "type": "string",
                       "pattern": "^conn_[a-f0-9-]{36}$"
                     },
-                    "organizationId": {
-                      "type": "string"
-                    },
                     "displayName": {
                       "type": "string"
-                    },
-                    "endpointUrl": {
-                      "type": "string",
-                      "maxLength": 2048,
-                      "description": "HTTPS endpoint for a streamable_http Connector; empty for a tunnel or backend_connection Connector, which the platform never dials."
-                    },
-                    "endpointVersion": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "transport": {
-                      "type": "string",
-                      "enum": [
-                        "streamable_http",
-                        "tunnel",
-                        "backend_connection"
-                      ],
-                      "description": "backend_connection: created by connector.serve on a Backend Connection, active from its first declaration, with no observation; update, activate, refresh-catalog and deactivate answer 409 for it."
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "inactive",
-                        "active"
-                      ]
-                    },
-                    "connectorVersion": {
-                      "type": "integer",
-                      "minimum": 1
                     },
                     "createdAt": {
                       "type": "string",
@@ -253,60 +131,14 @@
                     "updatedAt": {
                       "type": "string",
                       "format": "date-time"
-                    },
-                    "observation": {
-                      "type": "object",
-                      "nullable": true,
-                      "required": [
-                        "era",
-                        "protocolVersion",
-                        "endpointVersion",
-                        "probedAt",
-                        "expiresAt"
-                      ],
-                      "additionalProperties": false,
-                      "properties": {
-                        "era": {
-                          "type": "string",
-                          "enum": [
-                            "modern",
-                            "legacy"
-                          ]
-                        },
-                        "protocolVersion": {
-                          "type": "string"
-                        },
-                        "endpointVersion": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
-                        "probedAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        "expiresAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        }
-                      }
                     }
                   }
                 }
               }
             }
           },
-          "400": {
-            "description": "Invalid Connector request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "401": {
-            "description": "authentication_required: missing credentials, or the Organization API Key was revoked or rotated before the change committed.",
+            "description": "authentication_required: missing or invalid credentials.",
             "content": {
               "application/json": {
                 "schema": {
@@ -341,11 +173,11 @@
             "OrganizationApiKey": []
           }
         ],
-        "summary": "Get one Connector registration.",
+        "summary": "Get one Connector.",
         "tags": [
           "Connectors"
         ],
-        "description": "Authorization: OrganizationApiKey; persisted credentials determine Organization scope; no End User scope. Changes are attributed to the authentic Organization API Key; User API Keys neither manage nor read Connectors."
+        "description": "Authorization: OrganizationApiKey; persisted credentials determine Organization scope; no End User scope. User API Keys do not read Connectors; Application Servers declare them on a Backend Connection with connector.serve."
       }
     }
   },
@@ -400,6 +232,9 @@
                   "mcp_authorization_required",
                   "mcp_oauth_unavailable",
                   "mcp_oauth_confirmation_invalid",
+                  "mcp_authorization_mode_mismatch",
+                  "mcp_credential_rejected",
+                  "mcp_catalog_discovery_failed",
                   "model_provider_unconfigured",
                   "sandbox_unconfigured",
                   "sandbox_validation_pending",
@@ -470,6 +305,8 @@
                   "skill_name_conflict",
                   "skill_delete_blocked",
                   "mcp_server_delete_blocked",
+                  "mcp_server_name_conflict",
+                  "mcp_server_version_conflict",
                   "invalid_skill_package",
                   "skill_ingestion_not_found",
                   "skill_import_job_not_found",

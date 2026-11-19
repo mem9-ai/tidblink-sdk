@@ -178,9 +178,8 @@ const served = await serveOrdersConnector({
 });
 assert.match(served.connectorId, /^conn_/u);
 const connector = await organization.connectors.get(served.connectorId);
-assert.equal(connector.transport, "backend_connection");
-assert.equal(connector.status, "active");
-assert.equal(connector.observation, null);
+assert.deepEqual(Object.keys(connector).sort(), ["connectorId", "createdAt", "displayName", "updatedAt"]);
+assert.equal(connector.displayName, "sdk_orders");
 // Another Key of the same Organization reads the same Connector.
 assert(
   (await otherOrganization.connectors.list()).some(

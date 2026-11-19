@@ -1,6 +1,6 @@
 {
-  "revision": "501eee1c608111c1f04ac9311b9c55ed90be8170",
-  "sourceSchemaSha256": "744d5fe2e5535228e5453234d3bea85fa6ef0c80d6d0a07d957f074ef4730938",
+  "revision": "07d1f9c85c0fedd729c76c4cb4a48485d139c8ff",
+  "sourceSchemaSha256": "03051fb7b387a054f1d21ab331fc557bc348d4719eac77d809daa37644366ed4",
   "schema": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "tidb-link.backend.v1",
@@ -572,7 +572,7 @@
         }
       },
       "ConnectorServeRequest": {
-        "description": "Declare the functions of the Organization's Connector that this connection serves (ADR 0109). The core finds the Organization's Connector with this name, or creates it, and answers its connectorId: an Organization has one Connector name space, so the same name is the same Connector. Serving the same name again on this connection replaces this connection's declaration. A connection serves the Connector while it holds a declaration and stays open; connector.withdraw or the end of the connection ends its declaration. The Connector also stores the latest declaration served. A Run whose Template references the Connector freezes the declaration most recently served among the connections serving it, or the stored one when none serves it, and the model sees each function as mcp_<name>__<function name>, with the platform-reserved async choice. Creating the Connector or changing its stored declaration is audited with this connection's Key; serving an unchanged declaration is not. A call of a served function arrives as tool.call with connector on one connection serving the Connector whose declaration of the function matches the frozen one; with none, the call is not performed and the Turn continues. A streamable_http or tunnel Connector with this name is taken over in place: it keeps its connectorId, becomes a backend_connection Connector without endpoint or observation, and Runs that froze it under its old transport can no longer call it. Refused with connection_draining after connection.drain, and with authentication_required when the Key or its Organization is no longer valid; the connection then closes with 4001, which ends its declarations and attachments.",
+        "description": "Declare the functions of the Organization's Connector that this connection serves (ADR 0109). The core finds the Organization's Connector with this name, or creates it, and answers its connectorId: an Organization has one Connector name space, so the same name is the same Connector. Serving the same name again on this connection replaces this connection's declaration. A connection serves the Connector while it holds a declaration and stays open; connector.withdraw or the end of the connection ends its declaration. The Connector also stores the latest declaration served. A Run whose Template references the Connector freezes the declaration most recently served among the connections serving it, or the stored one when none serves it, and the model sees each function as mcp_<name>__<function name>, with the platform-reserved async choice. Creating the Connector or changing its stored declaration is audited with this connection's Key; serving an unchanged declaration is not. A call of a served function arrives as tool.call with connector on one connection serving the Connector whose declaration of the function matches the frozen one; with none, the call is not performed and the Turn continues. A Connector with this name left from the retired HTTP callback or tunnel transports, which listing and reading Connectors do not return, is taken over in place: it keeps its connectorId, so Templates that reference it need no change, and is listed from then on. Refused with connection_draining after connection.drain, and with authentication_required when the Key or its Organization is no longer valid; the connection then closes with 4001, which ends its declarations and attachments.",
         "type": "object",
         "required": [
           "jsonrpc",
@@ -1529,7 +1529,7 @@
                     "type": "string"
                   },
                   "details": {
-                    "description": "session.send only: the REST ErrorEnvelope details, when present. With reason mcp_authorization_required, details.registrations lists each MCP Server Registration whose MCP Authorization is not usable, as {serverId, owner: organization or end_user, reason: missing, invalid, revoked or insufficient_scope}."
+                    "description": "session.send only: the REST ErrorEnvelope details, when present. With reason mcp_authorization_required, details.registrations lists each MCP Server Registration whose MCP Authorization is not usable, as {serverId, owner: organization or end_user, reason: missing, invalid, revoked, insufficient_scope or catalog_unavailable}."
                   }
                 }
               }
