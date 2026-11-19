@@ -14,30 +14,14 @@ import {
 import { parseApiKeyTokenId } from "../src/auth/api-key-token";
 
 const exec = promisify(execFile);
-import { createServer as createNetServer, type AddressInfo } from "node:net";
 
 it("an independent installed SDK consumer uses Organization authority against the compiled backend", async () => {
-  // The consumer serves the example HTTP Connector on this loopback port; the
-  // harness routes the fictional HTTPS endpoint to it.
-  const connectorPort = await new Promise<number>((resolve, reject) => {
-    const probe = createNetServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const { port } = probe.address() as AddressInfo;
-      probe.close(() => resolve(port));
-    });
-  });
-  const connectorEndpoint = "https://sdk-connector.example.test/mcp";
   const harness = await startSystemHarness({
     databaseAdminUrl: process.env.TEST_TIDB_DATABASE_URL!,
     tidbSsl: process.env.TIDB_SSL ?? "off",
     controlledDrive9: true,
     controlledAudioTranscription: true,
     controlledVoiceProvider: true,
-    controlledMcpEndpoint: {
-      endpointUrl: connectorEndpoint,
-      loopbackUrl: `http://127.0.0.1:${connectorPort}/mcp`,
-    },
   });
   const temporary = await mkdtemp(
     path.join(tmpdir(), "tidb-link-org-consumer-"),
@@ -135,8 +119,6 @@ it("an independent installed SDK consumer uses Organization authority against th
         SDK_ORGANIZATION_KEY: token,
         SDK_OTHER_ORGANIZATION_KEY: other,
         SDK_TEMPLATE_ID: template.templateId,
-        SDK_CONNECTOR_ENDPOINT: connectorEndpoint,
-        SDK_CONNECTOR_PORT: String(connectorPort),
       },
     });
     let output = "";
@@ -147,7 +129,6 @@ it("an independent installed SDK consumer uses Organization authority against th
       output += bytes;
     });
     let paused: ReturnType<typeof harness.model.enqueueText> | undefined;
-    let title: ReturnType<typeof harness.model.enqueueText> | undefined;
     let connectorTitle: ReturnType<typeof harness.model.enqueueText> | undefined;
     const consumer = child;
     child.on("message", (message: { stage: string; userId?: string }) => {
@@ -159,19 +140,11 @@ it("an independent installed SDK consumer uses Organization authority against th
             userId: message.userId!,
           });
         } else if (message.stage === "text") {
+          // The Session was renamed first, so its first Turn requests no title.
           harness.model.enqueueText({
             chunks: ["Organization SDK answer."],
           });
-          title = harness.model.enqueueText({
-            chunks: ["SDK Organization journey"],
-            expectRequest: {
-              bodyIncludes: ["Generate exactly one concise session title."],
-            },
-          });
         } else if (message.stage === "tools") {
-          // A display name does not suppress the first Turn's background auto-title.
-          await title!.waitUntilRequested();
-          title!.verifyRequest();
           harness.model.enqueueToolCalls({
             toolCalls: [
               { id: "sdk_order", name: "lookup_order", arguments: {} },
@@ -196,7 +169,7 @@ it("an independent installed SDK consumer uses Organization authority against th
             toolCalls: [
               {
                 id: "sdk_connector_call",
-                name: "mcp_sdk_orders__lookup_order",
+                name: "mcp_sdk_orders__get_order",
                 arguments: { orderId: "order_7" },
               },
             ],
@@ -211,6 +184,22 @@ it("an independent installed SDK consumer uses Organization authority against th
             expectRequest: {
               bodyIncludes: ["Generate exactly one concise session title."],
             },
+          });
+        } else if (message.stage === "connector_offline") {
+          // The background title of the Connector Session's first Turn came first.
+          await connectorTitle?.waitUntilRequested();
+          harness.model.enqueueToolCalls({
+            toolCalls: [
+              {
+                id: "sdk_connector_offline_call",
+                name: "mcp_sdk_orders__get_order",
+                arguments: { orderId: "order_8" },
+              },
+            ],
+          });
+          harness.model.enqueueText({
+            chunks: ["Connector unavailable."],
+            expectRequest: { bodyIncludes: ["unavailable"] },
           });
         } else if (message.stage === "audio") {
           await connectorTitle?.waitUntilRequested();

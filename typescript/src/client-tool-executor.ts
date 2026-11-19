@@ -19,6 +19,8 @@ interface ToolCall {
   arguments: Record<string, unknown>;
   claimBy: string;
   deadlineAt: string;
+  /** Present on a Connector call only. */
+  connector?: { id: string; name: string };
 }
 
 type ClaimAnswer =
@@ -60,7 +62,11 @@ const isString = (value: unknown): value is string => typeof value === "string" 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const isConnector = (value: unknown): value is { id: string; name: string } =>
+  isObject(value) && isString(value.id) && isString(value.name);
+
 const parseCall = (params: Record<string, unknown>): ToolCall | undefined =>
+  (params.connector === undefined || isConnector(params.connector)) &&
   isString(params.callId) &&
   isString(params.sessionId) &&
   isString(params.userId) &&
@@ -98,26 +104,30 @@ const errorOf = (error: unknown): ToolResult => {
   return { error: { message: truncate(message || "The tool failed", ERROR_MAX) } };
 };
 
+/** Whose calls an executor runs: one Session's Client Tools, or one served Connector's functions. */
+export type ToolCallSource = { sessionId: string } | { connectorName: string };
+
 /**
- * Executes the Client Tool calls an executing Session connection receives:
- * claim first, run only after `claimed: true`, then submit the result over any
- * Backend Connection until the call's deadline. Each callId runs at most once.
+ * Executes the calls an executing Session connection or a served Connector
+ * receives: claim on the connection that delivered the call, run only after
+ * `claimed: true`, then submit the result over any Backend Connection until
+ * the call's deadline. Each callId runs at most once.
  */
 export class ClientToolExecutor {
   readonly #pool: BackendConnectionPool;
-  readonly #sessionId: string;
+  readonly #source: ToolCallSource;
   readonly #handlers: ClientToolHandlers;
   readonly #report: (error: unknown) => void;
   readonly #calls = new Map<string, CallState>();
 
   constructor(input: {
     pool: BackendConnectionPool;
-    sessionId: string;
+    source: ToolCallSource;
     handlers: ClientToolHandlers;
     report: (error: unknown) => void;
   }) {
     this.#pool = input.pool;
-    this.#sessionId = input.sessionId;
+    this.#source = input.source;
     this.#handlers = input.handlers;
     this.#report = input.report;
   }
@@ -125,8 +135,20 @@ export class ClientToolExecutor {
   /** Handle one `tool.call` from the connection that delivered it. */
   receive(params: Record<string, unknown>, link: BackendLink): void {
     const call = parseCall(params);
-    if (!call || call.sessionId !== this.#sessionId) {
-      this.#report(new TiDBLinkError("Received an invalid Client Tool call"));
+    const source = this.#source;
+    if (
+      !call ||
+      ("sessionId" in source
+        ? call.connector !== undefined || call.sessionId !== source.sessionId
+        : call.connector?.name !== source.connectorName)
+    ) {
+      this.#report(
+        new TiDBLinkError(
+          "sessionId" in source
+            ? "Received an invalid Client Tool call"
+            : "Received an invalid Connector call",
+        ),
+      );
       return;
     }
     // The core may send a call again after a reconnect; it runs once.
@@ -181,7 +203,9 @@ export class ClientToolExecutor {
     if (!handler)
       return {
         error: {
-          message: `Client Tool ${call.name} has no handler in this Application Server`,
+          message: call.connector
+            ? `Connector ${call.connector.name} has no function ${call.name} in this Application Server`
+            : `Client Tool ${call.name} has no handler in this Application Server`,
         },
       };
     const deadlineAt = new Date(call.deadlineAt);
@@ -204,6 +228,7 @@ export class ClientToolExecutor {
       name: call.name,
       deadlineAt,
       signal: controller.signal,
+      ...(call.connector ? { connector: { id: call.connector.id, name: call.connector.name } } : {}),
     };
     const run = (async () => {
       try {

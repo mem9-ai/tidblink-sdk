@@ -12,54 +12,33 @@ const metadata = JSON.parse(
   await readFile(new URL("metadata.json", import.meta.url)),
 );
 const connectors = "/api/v1/org/connectors";
-const body = (operation) =>
-  operation.requestBody.content["application/json"].schema;
 const success = (operation, status) =>
   operation.responses[status].content["application/json"].schema;
 
-test("Connector management keeps the selected contract under Organization authority", () => {
+test("the SDK freezes only the Connector reads, under Organization authority", () => {
   assert.equal(
     createHash("sha256").update(bytes).digest("hex"),
     metadata.snapshots["connectors.json"],
   );
   assert.equal(contract.revision, manifest.tidbLinkRevision);
   assert.equal(contract.sourceOpenApiSha256, manifest.tidbLinkOpenApiSha256);
-  for (const [path, methods] of Object.entries(contract.paths))
-    for (const operation of Object.values(methods))
-      assert.deepEqual(
-        operation.security,
-        path === "/api/v1/connectors/jwks" ? undefined : [{ OrganizationApiKey: [] }],
-      );
-  const register = contract.paths[connectors].post;
-  assert.deepEqual(body(register).required, ["displayName"]);
-  assert.deepEqual(body(register).properties.transport.enum, [
-    "streamable_http",
-    "tunnel",
-  ]);
-  const registration = success(register, "201");
-  for (const field of ["connectorId", "status", "connectorVersion", "transport", "endpointUrl"])
-    assert(registration.required.includes(field), field);
-  assert.deepEqual(registration.properties.status.enum, ["inactive", "active"]);
-  assert(body(contract.paths[`${connectors}/{connectorId}`].patch).required.includes("expectedConnectorVersion"));
-  for (const action of ["activate", "deactivate"]) {
-    const operation = contract.paths[`${connectors}/{connectorId}/${action}`].post;
-    assert.deepEqual(body(operation).required, ["expectedConnectorVersion"]);
-    assert(operation.responses["201"]);
-    assert(operation.responses["409"]);
+  assert.deepEqual(Object.keys(contract.paths).sort(), [connectors, `${connectors}/{connectorId}`]);
+  for (const methods of Object.values(contract.paths)) {
+    assert.deepEqual(Object.keys(methods).filter((key) => key !== "parameters"), ["get"]);
+    assert.deepEqual(methods.get.security, [{ OrganizationApiKey: [] }]);
   }
+  // Serving over the Backend Connection replaces registration and callbacks.
+  assert(!JSON.stringify(contract).includes("/api/v1/connectors/jwks"));
 });
 
-test("callback verification keys and token claims keep their documented form", () => {
-  const jwks = contract.paths["/api/v1/connectors/jwks"].get;
-  const key = success(jwks, "200").properties.keys.items;
-  assert.deepEqual(key.properties.kty.enum, ["OKP"]);
-  assert.deepEqual(key.properties.crv.enum, ["Ed25519"]);
-  assert.deepEqual(key.properties.alg.enum, ["EdDSA"]);
-  for (const text of [
-    "iss tidb-link/connector-callback/v1",
-    "aud tidb-link/connector",
-    "organizationId and connectorId",
-    "exp - iat <= 60 seconds",
-  ])
-    assert(jwks.description.includes(text), text);
+test("a Connector record names its transport, including Connectors served over Backend Connections", () => {
+  const record = success(contract.paths[`${connectors}/{connectorId}`].get, "200");
+  for (const field of ["connectorId", "transport", "status", "endpointUrl", "observation"])
+    assert(record.required.includes(field), field);
+  assert.deepEqual(record.properties.transport.enum, ["streamable_http", "tunnel", "backend_connection"]);
+  assert.match(record.properties.transport.description, /connector\.serve/);
+  assert.deepEqual(record.properties.status.enum, ["inactive", "active"]);
+  assert.equal(record.properties.observation.nullable, true);
+  const page = success(contract.paths[connectors].get, "200");
+  assert.deepEqual(page.required, ["connectors"]);
 });

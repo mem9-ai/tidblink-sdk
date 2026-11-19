@@ -1,20 +1,21 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign } from "node:crypto";
-import { createServer } from "node:http";
+import { setTimeout as delay } from "node:timers/promises";
 import { after, test } from "node:test";
 import {
-  ConflictError,
-  ConnectorAuthError,
-  ConnectorKeySet,
+  BackendConnectionClosedError,
+  BackendRequestError,
   OrganizationClient,
-  readConnectorCallContext,
-  verifyConnectorCallback,
+  ServedConnector,
+  TiDBLinkError,
 } from "../dist/index.js";
-import { createConnectorHandler } from "../examples/http-connector.mjs";
+import * as sdk from "../dist/index.js";
+import { BackendConnectionPool } from "../dist/backend-pool.js";
+import { serveConnector } from "../dist/connector-serve.js";
+import { memoryOrders, serveOrdersConnector } from "../examples/serve-connector.mjs";
+import { backendServer } from "./support/backend-server.mjs";
 
 const apiKey = "ti_org_connect_" + "x".repeat(43);
 const baseUrl = "https://tidb-link.test";
-const organizationId = "org_1";
 const connectorId = "conn_00000000-0000-0000-0000-000000000001";
 const json = (value, status = 200) =>
   new Response(JSON.stringify(value), {
@@ -23,203 +24,395 @@ const json = (value, status = 200) =>
   });
 
 const servers = [];
-after(() => Promise.all(servers.map((s) => new Promise((r) => { s.closeAllConnections(); s.close(r); }))));
+const pools = [];
+const clients = [];
+after(async () => {
+  await Promise.all([...pools, ...clients].map((owner) => owner.close()));
+  await Promise.all(servers.map((server) => server.close()));
+});
 
-const signing = generateKeyPairSync("ed25519");
-const jwk = { ...signing.publicKey.export({ format: "jwk" }), kid: "k1", alg: "EdDSA", use: "sig" };
-const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
-const token = (claims = {}, header = {}, key = signing.privateKey) => {
-  const now = Math.floor(Date.now() / 1000);
-  const input = `${encode({ alg: "EdDSA", typ: "JWT", kid: "k1", ...header })}.${encode({
-    iss: "tidb-link/connector-callback/v1",
-    aud: "tidb-link/connector",
-    organizationId,
-    connectorId,
-    iat: now,
-    exp: now + 60,
-    ...claims,
-  })}`;
-  return `Bearer ${input}.${sign(null, Buffer.from(input), key).toString("base64url")}`;
+const record = {
+  connectorId,
+  organizationId: "org_1",
+  displayName: "orders",
+  endpointUrl: "",
+  endpointVersion: 1,
+  transport: "backend_connection",
+  status: "active",
+  connectorVersion: 1,
+  createdAt: "2026-11-19T00:00:00.000Z",
+  updatedAt: "2026-11-19T00:00:00.000Z",
+  observation: null,
 };
-const keySet = () => {
-  const requests = [];
-  const keys = new ConnectorKeySet({
-    baseUrl,
-    fetch: async (url) => {
-      requests.push(String(url));
-      return json({ keys: [jwk] });
+
+/**
+ * A core stand-in whose connections record every client message in
+ * `peer.log` and answer through `respond(message, peer, index)`; by default
+ * it serves Connectors, claims calls and accepts results.
+ */
+const start = async ({ respond, ...options } = {}) => {
+  let count = 0;
+  const server = await backendServer({
+    ...options,
+    onConnection: (peer) => {
+      const index = count++;
+      peer.log = [];
+      options.onConnection?.(peer, index);
+      void (async () => {
+        for (;;) {
+          const message = await peer.next();
+          peer.log.push(message);
+          const answer =
+            (await respond?.(message, peer, index)) ??
+            {
+              "connector.serve": { result: { connectorId } },
+              "connector.withdraw": { result: {} },
+              "session.attach": { result: { generation: 1, cursor: "0" } },
+              "session.detach": { result: {} },
+              "tool.claim": { result: { claimed: true } },
+              "tool.result": { result: { accepted: true } },
+            }[message.method];
+          if (answer && answer !== "silent")
+            peer.send({ jsonrpc: "2.0", id: message.id, ...answer });
+        }
+      })();
     },
   });
-  return { keys, requests };
+  servers.push(server);
+  return server;
 };
-
-const registration = {
-  connectorId,
-  organizationId,
-  displayName: "Orders",
-  endpointUrl: "https://orders.example.com/mcp",
-  endpointVersion: 1,
-  transport: "streamable_http",
-  status: "inactive",
-  connectorVersion: 1,
-  createdAt: "2026-11-11T00:00:00.000Z",
-  updatedAt: "2026-11-11T00:00:00.000Z",
+const poolFor = (server, options = {}) => {
+  const pool = new BackendConnectionPool({ baseUrl: server.baseUrl, apiKey, idleCloseMs: 50, ...options });
+  pools.push(pool);
+  return pool;
 };
+const until = async (predicate, timeoutMs = 5000) => {
+  const end = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > end) throw new Error("condition not reached");
+    await delay(10);
+  }
+};
+const methodOf = (peer, method) => peer.log.filter((message) => message.method === method);
+const call = (callId, name, args = {}, overrides = {}) => ({
+  jsonrpc: "2.0",
+  method: "tool.call",
+  params: {
+    callId,
+    sessionId: "sess_9",
+    userId: "user_9",
+    turnId: "turn_9",
+    name,
+    arguments: args,
+    claimBy: new Date(Date.now() + 5000).toISOString(),
+    deadlineAt: new Date(Date.now() + 60_000).toISOString(),
+    connector: { id: connectorId, name: "orders" },
+    ...overrides,
+  },
+});
+const lookup = (runs = []) => ({
+  get_order: {
+    description: "Read one of the user's orders",
+    parameters: { type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] },
+    run: async (args, context) => {
+      runs.push({ args, context });
+      return `Order ${args.orderId} shipped`;
+    },
+  },
+});
 
-test("Connectors are registered, edited, activated and deactivated with their expected version", async () => {
+test("Connectors are read, and registration, callbacks and verification are gone", async () => {
   const calls = [];
   const organization = new OrganizationClient({
     baseUrl,
     apiKey,
     fetch: async (input, init = {}) => {
       const url = new URL(String(input));
-      calls.push({
-        method: init.method ?? "GET",
-        path: url.pathname.replace("/api/v1/org", ""),
-        body: init.body === undefined ? undefined : JSON.parse(init.body),
-      });
-      if (url.pathname.endsWith("/connectors") && (init.method ?? "GET") === "GET") return json({ connectors: [registration] });
-      if (url.pathname.endsWith("/deactivate"))
-        return json({ error: { code: "resource_conflict", message: "Version changed" } }, 409);
-      return json(registration, init.method === "POST" ? 201 : 200);
+      calls.push(`${init.method ?? "GET"} ${url.pathname.replace("/api/v1/org", "")}`);
+      return url.pathname.endsWith("/connectors") ? json({ connectors: [record] }) : json(record);
     },
   });
+  clients.push(organization);
   const { connectors } = organization;
-  await connectors.register({ displayName: "Orders", endpointUrl: registration.endpointUrl });
-  assert.equal((await connectors.list())[0].connectorId, connectorId);
-  await connectors.get(connectorId);
-  await connectors.update(connectorId, { displayName: "Orders v2" }, { expectedConnectorVersion: 1 });
-  await connectors.activate(connectorId, { expectedConnectorVersion: 2 });
-  await assert.rejects(
-    connectors.deactivate(connectorId, { expectedConnectorVersion: 1 }),
-    ConflictError,
-  );
-  assert.deepEqual(
-    calls.map((c) => `${c.method} ${c.path} ${JSON.stringify(c.body ?? null)}`),
-    [
-      `POST /connectors {"displayName":"Orders","endpointUrl":"https://orders.example.com/mcp"}`,
-      "GET /connectors null",
-      `GET /connectors/${connectorId} null`,
-      `PATCH /connectors/${connectorId} {"expectedConnectorVersion":1,"displayName":"Orders v2"}`,
-      `POST /connectors/${connectorId}/activate {"expectedConnectorVersion":2}`,
-      `POST /connectors/${connectorId}/deactivate {"expectedConnectorVersion":1}`,
+  assert.deepEqual(await connectors.list(), [record]);
+  assert.equal((await connectors.get(connectorId)).transport, "backend_connection");
+  assert.deepEqual(calls, ["GET /connectors", `GET /connectors/${connectorId}`]);
+  for (const method of ["register", "update", "activate", "deactivate"])
+    assert.equal(connectors[method], undefined, method);
+  for (const name of [
+    "ConnectorKeySet",
+    "ConnectorAuthError",
+    "verifyConnectorCallback",
+    "readConnectorCallContext",
+    "CONNECTOR_CALLBACK_ISSUER",
+    "CONNECTOR_CALLBACK_AUDIENCE",
+    "CONNECTOR_CALL_CONTEXT_KEY",
+  ])
+    assert.equal(sdk[name], undefined, name);
+});
+
+test("serveConnector checks names, functions and parameters before connecting", async () => {
+  const server = await start();
+  const pool = poolFor(server);
+  const run = async () => "";
+  const tool = (parameters = { type: "object", properties: {} }) => ({ description: "A function", parameters, run });
+  for (const [options, label] of [
+    [{ name: "Orders", tools: {} }, "uppercase name"],
+    [{ name: "orders_", tools: {} }, "trailing underscore"],
+    [{ name: "my__orders", tools: {} }, "double underscore"],
+    [{ name: "o".repeat(30), tools: {} }, "30 characters"],
+    [{ name: "orders", tools: { "get-order": tool() } }, "function name with a dash"],
+    [{ name: "orders", tools: { get_order: { ...tool(), run: undefined } } }, "no run"],
+    [{ name: "orders", tools: { get_order: tool({ properties: {} }) } }, "parameters without type object"],
+    [{ name: "orders", tools: { get_order: tool({ type: "object", properties: { async: { type: "boolean" } } }) } }, "defines async"],
+    [{ name: "orders", tools: { get_order: tool({ type: "object", required: ["async"] }) } }, "requires async"],
+    [{ name: "orders", tools: { get_order: { ...tool(), description: "" } } }, "empty description"],
+    [{ name: "orders", tools: Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`f${i}`, tool()])) }, "65 functions"],
+    [{ name: "orders", tools: [] }, "tools array"],
+    [{ name: "orders", tools: {}, extra: true }, "unknown option"],
+  ])
+    await assert.rejects(serveConnector(pool, options), TypeError, label);
+  assert.equal(server.peers.length, 0);
+  // The longest names are accepted.
+  const served = await serveConnector(pool, { name: "o".repeat(29), tools: { ["f".repeat(29)]: tool() } });
+  assert.equal(served.connectorId, connectorId);
+});
+
+test("a served Connector runs a call from any Session on the connection that delivered it", async () => {
+  const server = await start();
+  const organization = new OrganizationClient({ baseUrl: server.baseUrl, apiKey });
+  clients.push(organization);
+  const runs = [];
+  const served = await organization.serveConnector({ name: "orders", tools: lookup(runs) });
+  assert(served instanceof ServedConnector);
+  assert.equal(served.name, "orders");
+  assert.equal(served.connectorId, connectorId);
+  const peer = server.peers[0];
+  assert.deepEqual(methodOf(peer, "connector.serve")[0].params, {
+    name: "orders",
+    tools: [
+      {
+        type: "function",
+        name: "get_order",
+        description: "Read one of the user's orders",
+        parameters: { type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] },
+      },
     ],
+  });
+  // No Session is attached: the call is routed by its Connector.
+  peer.send(call("call_1", "get_order", { orderId: "o_7" }));
+  await until(() => methodOf(peer, "tool.result").length === 1);
+  assert.deepEqual(methodOf(peer, "tool.claim")[0].params, { callId: "call_1" });
+  assert.deepEqual(methodOf(peer, "tool.result")[0].params, { callId: "call_1", output: "Order o_7 shipped" });
+  assert.equal(runs.length, 1);
+  const { context } = runs[0];
+  assert.deepEqual(
+    { ...context, deadlineAt: undefined, signal: undefined },
+    {
+      callId: "call_1",
+      sessionId: "sess_9",
+      userId: "user_9",
+      turnId: "turn_9",
+      name: "get_order",
+      deadlineAt: undefined,
+      signal: undefined,
+      connector: { id: connectorId, name: "orders" },
+    },
   );
-  await assert.rejects(connectors.activate(connectorId, {}), TypeError);
-  await assert.rejects(connectors.register({ displayName: "" }), TypeError);
+  assert(context.deadlineAt instanceof Date);
+  // A call for a Connector this process does not serve is left unclaimed.
+  peer.send(call("call_2", "get_order", { orderId: "o_8" }, { connector: { id: "conn_x", name: "billing" } }));
+  await delay(50);
+  assert.equal(methodOf(peer, "tool.claim").length, 1);
 });
 
-test("a platform callback token verifies only for its Organization, Connector and lifetime", async () => {
-  const { keys, requests } = keySet();
-  const options = { keys, organizationId, connectorId };
-  const claims = await verifyConnectorCallback(token(), options);
-  assert.equal(claims.connectorId, connectorId);
-  await verifyConnectorCallback(token(), options);
-  assert.deepEqual(requests, [`${baseUrl}/api/v1/connectors/jwks`]);
-
-  const now = Math.floor(Date.now() / 1000);
-  const other = generateKeyPairSync("ed25519").privateKey;
-  for (const [label, authorization] of [
-    ["missing", undefined],
-    ["not bearer", "Basic abc"],
-    ["other Organization", token({ organizationId: "org_2" })],
-    ["other Connector", token({ connectorId: "conn_other" })],
-    ["issuer", token({ iss: "someone" })],
-    ["audience", token({ aud: "someone" })],
-    ["expired", token({ iat: now - 120, exp: now - 60 })],
-    ["too long", token({ exp: now + 3600 })],
-    ["algorithm", token({}, { alg: "HS256" })],
-    ["signature", token({}, {}, other)],
-  ])
-    await assert.rejects(verifyConnectorCallback(authorization, options), ConnectorAuthError, label);
-
-  // An unknown key does not refetch the keys again within the refresh interval.
-  await assert.rejects(verifyConnectorCallback(token({}, { kid: "k2" }), options), ConnectorAuthError);
-  await assert.rejects(verifyConnectorCallback(token({}, { kid: "k2" }), options), ConnectorAuthError);
-  assert.equal(requests.length, 1);
-});
-
-test("the Call Context is read from tools/call metadata and bound to the Organization", () => {
-  const context = {
-    callId: "op_1",
-    sessionId: "session_1",
-    organizationId,
-    userId: "user_1",
-    deadline: "2099-01-01T00:00:00.000Z",
-    attempt: 1,
-  };
-  assert.deepEqual(readConnectorCallContext({ "tidb-link/context": context }, { organizationId }), context);
-  for (const meta of [
-    undefined,
-    {},
-    { "tidb-link/context": { ...context, organizationId: "org_2" } },
-    { "tidb-link/context": { ...context, attempt: 2 } },
-    { "tidb-link/context": { ...context, userId: "" } },
-  ])
-    assert.throws(() => readConnectorCallContext(meta, { organizationId }), ConnectorAuthError);
-});
-
-test("the example HTTP Connector answers MCP requests only with a valid platform token", async () => {
-  const { keys } = keySet();
-  const seen = [];
-  const handler = createConnectorHandler({
-    baseUrl,
-    organizationId,
-    connectorId,
-    keys,
+test("refused claims never run, duplicates run once, and unknown functions and deadlines become errors", async () => {
+  const server = await start({
+    respond: (message) =>
+      message.method === "tool.claim" && message.params.callId.startsWith("refused")
+        ? { result: { claimed: false, reason: message.params.callId.slice(8) } }
+        : undefined,
+  });
+  const pool = poolFor(server);
+  const runs = [];
+  await serveConnector(pool, {
+    name: "orders",
     tools: {
-      lookup_order: {
-        description: "Look up an order",
-        inputSchema: { type: "object", properties: { orderId: { type: "string" } } },
-        run: async ({ orderId }, context) => {
-          seen.push(context.callId);
-          return `order ${orderId} for ${context.userId}`;
-        },
+      ...lookup(runs),
+      slow: {
+        description: "Never finishes",
+        parameters: { type: "object" },
+        run: (_args, { signal }) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason))),
       },
     },
   });
-  const server = createServer(handler);
-  servers.push(server);
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const url = `http://127.0.0.1:${server.address().port}/mcp`;
-  const rpc = (body, authorization = token()) =>
-    fetch(url, {
-      method: "POST",
-      headers: { authorization, "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
+  const peer = server.peers[0];
+  for (const reason of ["call_not_found", "call_settled", "claim_window_closed", "superseded"])
+    peer.send(call(`refused_${reason}`, "get_order", { orderId: "o_1" }));
+  peer.send(call("call_1", "get_order", { orderId: "o_1" }));
+  peer.send(call("call_1", "get_order", { orderId: "o_1" }));
+  peer.send(call("call_2", "list_everything"));
+  peer.send(call("call_3", "slow", {}, { deadlineAt: new Date(Date.now() + 100).toISOString() }));
+  await until(() => methodOf(peer, "tool.result").length === 3);
+  await delay(50);
+  assert.equal(runs.length, 1);
+  assert.equal(methodOf(peer, "tool.claim").length, 7);
+  const results = Object.fromEntries(methodOf(peer, "tool.result").map((m) => [m.params.callId, m.params]));
+  assert.deepEqual(Object.keys(results).sort(), ["call_1", "call_2", "call_3"]);
+  assert.deepEqual(results.call_2.error, {
+    message: "Connector orders has no function list_everything in this Application Server",
+  });
+  assert.deepEqual(results.call_3.error, { message: "The tool did not finish before its deadline" });
+});
 
-  assert.equal((await rpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, "Bearer a.b.c")).status, 401);
-  const init = await (await rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })).json();
-  assert.deepEqual(init.result.capabilities, { tools: {} });
-  assert.equal((await rpc({ jsonrpc: "2.0", method: "notifications/initialized" })).status, 202);
-  const list = await (await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
-  assert.deepEqual(list.result.tools.map((t) => t.name), ["lookup_order"]);
-  const call = await (
-    await rpc({
-      jsonrpc: "2.0",
-      id: 3,
-      method: "tools/call",
-      params: {
-        name: "lookup_order",
-        arguments: { orderId: "o1" },
-        _meta: {
-          "tidb-link/context": {
-            callId: "op_1",
-            sessionId: "s1",
-            organizationId,
-            userId: "user_1",
-            deadline: "2099-01-01T00:00:00.000Z",
-            attempt: 1,
-          },
-        },
-      },
-    })
-  ).json();
-  assert.deepEqual(call.result.content, [{ type: "text", text: "order o1 for user_1" }]);
-  const missing = await (
-    await rpc({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "lookup_order", arguments: {} } })
-  ).json();
-  assert.equal(missing.error.code, -32602);
-  assert.deepEqual(seen, ["op_1"]);
+test("a Connector is declared on every connection, including ones opened later", async () => {
+  const server = await start({ helloParams: { maxSessions: 1 } });
+  const pool = poolFor(server);
+  const session = (sessionId) => ({
+    sessionId,
+    attachParams: () => ({ userId: "user_1", sessionId }),
+    attached() {},
+    notify() {},
+    ended() {},
+  });
+  await pool.attach(session("s1"));
+  await pool.attach(session("s2"));
+  assert.equal(pool.connections, 2);
+  await serveConnector(pool, { name: "orders", tools: lookup() });
+  await until(() => server.peers.every((peer) => methodOf(peer, "connector.serve").length === 1));
+  await pool.attach(session("s3"));
+  assert.equal(pool.connections, 3);
+  await until(() => methodOf(server.peers[2], "connector.serve").length === 1);
+  // A call delivered on the second connection is claimed there.
+  server.peers[1].send(call("call_1", "get_order", { orderId: "o_1" }));
+  await until(() => methodOf(server.peers[1], "tool.claim").length === 1);
+  assert.equal(methodOf(server.peers[0], "tool.claim").length, 0);
+});
+
+test("serving keeps one connection open; close() withdraws it and idle connections close again", async () => {
+  const server = await start();
+  const pool = poolFor(server);
+  const served = await serveConnector(pool, { name: "orders", tools: lookup() });
+  await delay(200);
+  assert.equal(pool.connections, 1);
+  assert.equal(server.peers.length, 1);
+  await served.close();
+  assert.deepEqual(methodOf(server.peers[0], "connector.withdraw")[0].params, { name: "orders" });
+  assert.deepEqual(await served.closed, { reason: "closed" });
+  assert.equal((await server.peers[0].closed).code, 1000);
+  assert.equal(pool.connections, 0);
+  // The name is free again.
+  await serveConnector(pool, { name: "orders", tools: lookup() });
+});
+
+test("a lost or draining connection declares the Connector again on a new one", async () => {
+  const server = await start();
+  const pool = poolFor(server);
+  const served = await serveConnector(pool, { name: "orders", tools: lookup() });
+  server.peers[0].destroy();
+  const second = await server.connection(1);
+  await until(() => methodOf(second, "connector.serve").length === 1);
+  second.send({ jsonrpc: "2.0", method: "connection.drain", params: { closeAfterMs: 5000 } });
+  const third = await server.connection(2);
+  await until(() => methodOf(third, "connector.serve").length === 1);
+  assert.equal((await second.closed).code, 1000);
+  assert.equal(pool.connections, 1);
+  third.send(call("call_1", "get_order", { orderId: "o_1" }));
+  await until(() => methodOf(third, "tool.result").length === 1);
+  let settled = false;
+  served.closed.then(() => (settled = true));
+  await delay(20);
+  assert.equal(settled, false);
+});
+
+test("a duplicate name, a refused declaration and a revoked Key end serving", async () => {
+  let revoked = false;
+  const server = await start({
+    onConnection: (peer) => {
+      if (revoked) peer.close(4001, "authentication failed");
+    },
+    respond: (message) =>
+      message.method === "connector.serve" && message.params.name === "invalid"
+        ? { error: { code: -32602, message: "Invalid params" } }
+        : undefined,
+  });
+  const pool = poolFor(server);
+  const errors = [];
+  const served = await serveConnector(pool, { name: "orders", tools: lookup(), onError: (e) => errors.push(e) });
+  await assert.rejects(serveConnector(pool, { name: "orders", tools: lookup() }), TiDBLinkError);
+  await assert.rejects(
+    serveConnector(pool, { name: "invalid", tools: lookup() }),
+    (error) => error instanceof BackendRequestError && error.code === -32602,
+  );
+  // The refused name is not served: it can be tried again.
+  await assert.rejects(serveConnector(pool, { name: "invalid", tools: lookup() }), BackendRequestError);
+  revoked = true;
+  server.peers[0].close(4001, "revoked");
+  const end = await served.closed;
+  assert.equal(end.reason, "error");
+  assert(end.error instanceof BackendConnectionClosedError);
+  assert.equal(end.error.code, 4001);
+  assert.deepEqual(errors, []);
+});
+
+test("closing the OrganizationClient ends serving and refuses new Connectors", async () => {
+  const server = await start();
+  const organization = new OrganizationClient({ baseUrl: server.baseUrl, apiKey });
+  const served = await organization.serveConnector({ name: "orders", tools: lookup() });
+  await organization.close();
+  assert.deepEqual(await served.closed, { reason: "closed" });
+  await assert.rejects(organization.serveConnector({ name: "orders", tools: lookup() }), TiDBLinkError);
+});
+
+test("the packaged example answers with the calling user's orders only", async () => {
+  const server = await start();
+  const organization = new OrganizationClient({ baseUrl: server.baseUrl, apiKey });
+  clients.push(organization);
+  const orders = memoryOrders({
+    user_9: [{ orderId: "o_1", status: "shipped" }],
+    user_8: [{ orderId: "o_2", status: "open" }],
+  });
+  const served = await serveOrdersConnector({ organization, orders });
+  assert.equal(served.connectorId, connectorId);
+  const peer = server.peers[0];
+  assert.deepEqual(
+    methodOf(peer, "connector.serve")[0].params.tools.map((tool) => tool.name),
+    ["list_orders", "get_order"],
+  );
+  peer.send(call("call_1", "list_orders"));
+  peer.send(call("call_2", "get_order", { orderId: "o_2" }));
+  await until(() => methodOf(peer, "tool.result").length === 2);
+  const results = Object.fromEntries(methodOf(peer, "tool.result").map((m) => [m.params.callId, m.params]));
+  assert.deepEqual(JSON.parse(results.call_1.output), [{ orderId: "o_1", status: "shipped" }]);
+  assert.deepEqual(results.call_2.error, { message: "Order o_2 was not found" });
+});
+
+test("a transient refusal of a further declaration is retried on the same connection", async () => {
+  let refusals = 1;
+  const server = await start({
+    helloParams: { maxSessions: 1 },
+    respond: (message, _peer, index) =>
+      message.method === "connector.serve" && index === 1 && refusals-- > 0
+        ? { error: { code: -32603, message: "Internal error" } }
+        : undefined,
+  });
+  const pool = poolFor(server);
+  const errors = [];
+  await serveConnector(pool, { name: "orders", tools: lookup(), onError: (e) => errors.push(e) });
+  await pool.attach({
+    sessionId: "s1",
+    attachParams: () => ({ userId: "user_1", sessionId: "s1" }),
+    attached() {},
+    notify() {},
+    ended() {},
+  });
+  await pool.attach({
+    sessionId: "s2",
+    attachParams: () => ({ userId: "user_1", sessionId: "s2" }),
+    attached() {},
+    notify() {},
+    ended() {},
+  });
+  await until(() => server.peers[1] && methodOf(server.peers[1], "connector.serve").length === 2);
+  assert.deepEqual(errors, []);
 });

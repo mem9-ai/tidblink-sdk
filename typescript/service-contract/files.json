@@ -1,6 +1,6 @@
 {
-  "revision": "c21a5e3a091c938576ee3bb36cba72baf0e87022",
-  "sourceOpenApiSha256": "0b7b19720f557a0b3385b297cf59207e94d6c087100192d4f65800642dc491ba",
+  "revision": "501eee1c608111c1f04ac9311b9c55ed90be8170",
+  "sourceOpenApiSha256": "29f5ea39cc310ce69ece6b2351fac64bba015c07e83dd11a532be3e073feb96b",
   "paths": {
     "/api/v1/org/users/{userId}/files": {
       "get": {
@@ -1737,6 +1737,9 @@
                   "agent_template_unavailable",
                   "session_model_not_allowed",
                   "session_execution_dependency_unavailable",
+                  "mcp_authorization_required",
+                  "mcp_oauth_unavailable",
+                  "mcp_oauth_confirmation_invalid",
                   "model_provider_unconfigured",
                   "sandbox_unconfigured",
                   "sandbox_validation_pending",
@@ -1806,6 +1809,7 @@
                   "idempotency_witness_invalid",
                   "skill_name_conflict",
                   "skill_delete_blocked",
+                  "mcp_server_delete_blocked",
                   "invalid_skill_package",
                   "skill_ingestion_not_found",
                   "skill_import_job_not_found",
@@ -1998,17 +2002,48 @@
                 "format": "date-time"
               },
               "source": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": [
-                      "user_upload"
+                "description": "`user_upload` for an upload by the owner; `session` for a Session file that an Operation of the owner's Session produced, such as an image or binary MCP tool result.",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "user_upload"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "session"
+                        ]
+                      },
+                      "sessionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "operationId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "sessionId",
+                      "operationId"
                     ]
                   }
-                },
-                "required": [
-                  "kind"
                 ]
               }
             },
@@ -2094,17 +2129,48 @@
                     "format": "date-time"
                   },
                   "source": {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "user_upload"
+                    "description": "`user_upload` for an upload by the owner; `session` for a Session file that an Operation of the owner's Session produced, such as an image or binary MCP tool result.",
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "user_upload"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "session"
+                            ]
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "operationId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "sessionId",
+                          "operationId"
                         ]
                       }
-                    },
-                    "required": [
-                      "kind"
                     ]
                   }
                 },
@@ -2267,17 +2333,48 @@
                   "format": "date-time"
                 },
                 "source": {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "user_upload"
+                  "description": "`user_upload` for an upload by the owner; `session` for a Session file that an Operation of the owner's Session produced, such as an image or binary MCP tool result.",
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "user_upload"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "session"
+                          ]
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "operationId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "sessionId",
+                        "operationId"
                       ]
                     }
-                  },
-                  "required": [
-                    "kind"
                   ]
                 }
               },
@@ -2491,17 +2588,48 @@
                     "format": "date-time"
                   },
                   "source": {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "user_upload"
+                    "description": "`user_upload` for an upload by the owner; `session` for a Session file that an Operation of the owner's Session produced, such as an image or binary MCP tool result.",
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "user_upload"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "session"
+                            ]
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "operationId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "sessionId",
+                          "operationId"
                         ]
                       }
-                    },
-                    "required": [
-                      "kind"
                     ]
                   }
                 },

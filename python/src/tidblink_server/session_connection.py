@@ -53,7 +53,7 @@ _TOOL_NAME = re.compile(r"[a-zA-Z0-9_-]{1,64}")
 
 @dataclass(frozen=True)
 class ClientToolHandler:
-    """One Client Tool: its declaration, which the model sees, and the function that executes it.
+    """One Client Tool or Connector function: its declaration, which the model sees, and the function that executes it.
 
     ``run(args, context)`` executes one call, usually by forwarding it to a
     device; it may be sync or async. Return the text the model receives;
@@ -505,14 +505,16 @@ class SessionConnection:
         self._jobs.put_nowait(_STOP)
 
 
-def _handler_of(name: str, handler: object) -> ClientToolHandler:
+def _handler_of(name: str, handler: object, kind: str = "Client Tool") -> ClientToolHandler:
     if isinstance(handler, ClientToolHandler):
+        if not callable(handler.run):
+            raise TypeError(f"{kind} {name} requires a run function")
         return handler
     if not isinstance(handler, Mapping):
-        raise TypeError(f"Client Tool {name} must be a ClientToolHandler or a mapping")
-    fields = require_known_keys(handler, ("description", "parameters", "run"), f"Client Tool {name}")
+        raise TypeError(f"{kind} {name} must be a ClientToolHandler or a mapping")
+    fields = require_known_keys(handler, ("description", "parameters", "run"), f"{kind} {name}")
     if not callable(fields.get("run")):
-        raise TypeError(f"Client Tool {name} requires a run function")
+        raise TypeError(f"{kind} {name} requires a run function")
     return ClientToolHandler(
         description=fields.get("description"),  # type: ignore[arg-type]
         parameters=fields.get("parameters"),  # type: ignore[arg-type]

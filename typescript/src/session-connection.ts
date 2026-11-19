@@ -32,7 +32,10 @@ import {
 } from "./session-send.js";
 import type { TurnResult } from "./turn.js";
 
-/** What a Client Tool handler learns about the call it runs. */
+/**
+ * What a Client Tool or Connector function handler learns about the call it
+ * runs. A Connector call can come from any Session of the Organization.
+ */
 export interface ClientToolCallContext {
   callId: string;
   sessionId: string;
@@ -44,6 +47,11 @@ export interface ClientToolCallContext {
   deadlineAt: Date;
   /** Aborts when the deadline passes. */
   signal: AbortSignal;
+  /**
+   * On a Connector call only: the Connector whose function runs, as
+   * `serveConnector` served it.
+   */
+  connector?: { id: string; name: string };
 }
 
 /**
@@ -201,7 +209,7 @@ export class SessionConnection {
       ? undefined
       : new ClientToolExecutor({
           pool,
-          sessionId,
+          source: { sessionId },
           handlers: options.tools ?? {},
           report: (error) => this.#report(error),
         });

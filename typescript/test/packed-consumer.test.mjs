@@ -32,7 +32,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
   assert(files.includes("examples/send-message.mjs"));
   assert(files.includes("examples/read-usage.mjs"));
   assert(files.includes("examples/control-turn.mjs"));
-  assert(files.includes("examples/http-connector.mjs"));
+  assert(files.includes("examples/serve-connector.mjs"));
   assert(files.includes("examples/lamp-backend.mjs"));
   assert(files.includes("examples/upload-file.mjs"));
   assert(files.includes("examples/submit-audio.mjs"));
@@ -47,7 +47,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
         file === "examples/create-session.mjs" ||
         file === "examples/send-message.mjs" ||
         file === "examples/read-usage.mjs" ||
-        file === "examples/http-connector.mjs" ||
+        file === "examples/serve-connector.mjs" ||
         file === "examples/lamp-backend.mjs" ||
         file === "examples/control-turn.mjs" ||
         file === "examples/upload-file.mjs" ||
@@ -114,7 +114,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       ConnectOptions, ClientToolHandlers, SendOptions, SessionConnectionEnd, SessionConnection,
       Template, TemplateContent, TemplateCatalog, TemplatePage, SkillUpload, SkillDetail,
       KnownSessionEvent,
-      Connector, ConnectorCallbackClaims, ConnectorCallContext,
+      Connector, ConnectorTransport, ServeConnectorOptions, ServedConnector, ServedConnectorEnd,
     } from "@tidblink/server";
     import {
       TIDB_LINK_API_VERSION,
@@ -128,10 +128,11 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       TiDBLinkError,
       OrganizationClient,
       asKnownSessionEvent,
-      ConnectorKeySet,
-      verifyConnectorCallback,
-      readConnectorCallContext,
     } from "@tidblink/server";
+    // @ts-expect-error HTTP callback Connectors were retired; serve Connectors over Backend Connections.
+    import { ConnectorKeySet, verifyConnectorCallback, readConnectorCallContext } from "@tidblink/server";
+    // @ts-expect-error Connector registration types were removed with registration.
+    import type { RegisterConnectorInput, UpdateConnectorInput, ConnectorVersionOptions } from "@tidblink/server";
     // @ts-expect-error Previous compatibility constants and error exports have no aliases.
     import { AGENT_SERVICE_API_VERSION, AGENT_SERVICE_REVISION, AgentStackError, AgentStackApiError } from "@tidblink/server";
     // @ts-expect-error Workspace authority was removed from the supported SDK.
@@ -189,17 +190,35 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       void page; void detail;
       return organization.templates.archive(created.template.id, { ifMatch: created.template.etag, idempotencyKey: "archive-1" });
     }
-    async function connectorWorkflow(authorization: string, meta: unknown): Promise<string> {
-      const registered: Connector = await organization.connectors.register({ displayName: "Orders", endpointUrl: "https://orders.example.com/mcp" });
-      const active: Connector = await organization.connectors.activate(registered.connectorId, { expectedConnectorVersion: registered.connectorVersion });
-      // @ts-expect-error Changes require the expected version.
-      await organization.connectors.deactivate(active.connectorId, {});
-      const keys = new ConnectorKeySet({ baseUrl });
-      const claims: ConnectorCallbackClaims = await verifyConnectorCallback(authorization, { keys, organizationId: "org", connectorId: active.connectorId });
-      const context: ConnectorCallContext = readConnectorCallContext(meta, { organizationId: claims.organizationId });
-      const attempt: 1 = context.attempt;
-      void attempt;
-      return context.userId;
+    async function connectorWorkflow(handlers: ClientToolHandlers): Promise<string> {
+      const options: ServeConnectorOptions = {
+        name: "orders",
+        tools: {
+          ...handlers,
+          get_order: {
+            description: "Read one of the user's orders",
+            parameters: { type: "object", properties: { orderId: { type: "string" } } },
+            run: async (args, context) => {
+              const connector: { id: string; name: string } | undefined = context.connector;
+              void connector;
+              return { orderId: args.orderId, userId: context.userId };
+            },
+          },
+        },
+        onError: (error: unknown) => void error,
+      };
+      const served: ServedConnector = await organization.serveConnector(options);
+      const end: ServedConnectorEnd = await served.closed;
+      void end;
+      await served.close();
+      const listed: Connector[] = await organization.connectors.list();
+      const transport: ConnectorTransport = (await organization.connectors.get(served.connectorId)).transport;
+      void listed; void transport;
+      // @ts-expect-error Connectors are created by serving them, not registered.
+      await organization.connectors.register({ displayName: "Orders", endpointUrl: "https://orders.example.com/mcp" });
+      // @ts-expect-error Connectors are not activated; serving one makes it callable.
+      await organization.connectors.activate(served.connectorId, { expectedConnectorVersion: 1 });
+      return served.connectorId;
     }
     async function connectionWorkflow(session: Session) {
       const tools: ClientToolHandlers = {

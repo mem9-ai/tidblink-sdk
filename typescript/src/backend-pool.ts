@@ -56,6 +56,29 @@ export interface PoolAttachment {
   ended(end: AttachmentEnd): void;
 }
 
+/** Why the pool stopped serving a Connector. It does not retry it. */
+export type ServingEnd =
+  /** `OrganizationClient.close()` closed every Backend Connection. */
+  | { reason: "closed" }
+  /** No connection could serve it any more, for example after a revoked Key. */
+  | { reason: "error"; error: unknown };
+
+/**
+ * The pool's view of one Connector this process serves. The pool declares it
+ * on every Backend Connection; a served Connector implements it.
+ */
+export interface PoolConnector {
+  readonly name: string;
+  /** Parameters of every `connector.serve`. */
+  readonly serveParams: Record<string, unknown>;
+  /** A `tool.call` for this Connector from the connection that delivered it. */
+  call(params: Record<string, unknown>, link: BackendLink): void;
+  /** A declaration failed on one connection without ending the Connector. */
+  report(error: unknown): void;
+  /** The pool gave the Connector up; called at most once, never after `withdraw()`. */
+  ended(end: ServingEnd): void;
+}
+
 export interface BackendConnectionPoolOptions {
   baseUrl: string;
   apiKey: string;
@@ -77,6 +100,8 @@ interface Slot {
   /** The core sent `connection.drain`; nothing new goes here. */
   draining: boolean;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Connectors declared, or being declared, on this connection, by name. */
+  readonly serving: Map<string, Promise<string>>;
 }
 
 const DEFAULT_IDLE_CLOSE_MS = 5_000;
@@ -100,6 +125,12 @@ const isTransient = (error: unknown): boolean =>
   (error instanceof BackendConnectionClosedError && error.retryable) ||
   (error instanceof BackendRequestError && error.code === -32603);
 
+const isServeResult = (value: unknown): value is { connectorId: string } =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { connectorId?: unknown }).connectorId === "string" &&
+  (value as { connectorId: string }).connectorId !== "";
+
 const isAttachResult = (value: unknown): value is AttachResult =>
   typeof value === "object" &&
   value !== null &&
@@ -114,8 +145,10 @@ const isAttachResult = (value: unknown): value is AttachResult =>
  * attachments open another connection, which the load balancer may place on
  * another replica. A lost connection's attachments re-attach elsewhere with
  * their latest parameters; `connection.drain` moves them before the core
- * closes the connection. Connections that hold nothing close after a short
- * idle period.
+ * closes the connection. Served Connectors are declared on every connection,
+ * so that a connection executing a Session also serves its Connector calls,
+ * and are declared again on each new one. Connections that hold nothing close
+ * after a short idle period, except the last one while a Connector is served.
  */
 export class BackendConnectionPool {
   readonly #url: string;
@@ -128,6 +161,11 @@ export class BackendConnectionPool {
   readonly #wanted = new Map<string, PoolAttachment>();
   /** The connection currently routing each attachment. */
   readonly #where = new Map<PoolAttachment, Slot>();
+  /** Connectors this process serves, by name. */
+  readonly #connectors = new Map<string, PoolConnector>();
+  /** Connectors whose `serve()` has not settled: it reports their failures. */
+  readonly #pendingServe = new Set<PoolConnector>();
+  #reopening = false;
   #opening: Promise<Slot> | undefined;
   #openFailures = 0;
   #attaching = 0;
@@ -279,12 +317,66 @@ export class BackendConnectionPool {
   }
 
   /**
+   * Serve a Connector on every connection, now and on each one opened later,
+   * until `withdraw()` or until the pool gives it up through `ended()`.
+   * Resolves with its connectorId once one connection serves it; rejects when
+   * the first declaration fails. One Connector per name is allowed at a time.
+   */
+  async serve(connector: PoolConnector): Promise<string> {
+    if (this.#closed) throw new TiDBLinkError("This OrganizationClient is closed");
+    if (this.#connectors.has(connector.name))
+      throw new TiDBLinkError(
+        `Connector ${connector.name} is already served through this OrganizationClient; close it first`,
+      );
+    this.#connectors.set(connector.name, connector);
+    this.#pendingServe.add(connector);
+    try {
+      for (let failures = 0; ; ) {
+        if (this.#connectors.get(connector.name) !== connector)
+          throw new TiDBLinkError("The Connector was closed while it was being served");
+        let slot: Slot | undefined;
+        try {
+          slot = await this.#servingSlot();
+          this.#cancelIdle(slot);
+          const connectorId = await this.#declare(slot, connector);
+          for (const other of this.#slots)
+            if (other !== slot && this.#serves(other)) void this.#declareQuietly(other, connector);
+          return connectorId;
+        } catch (error) {
+          failures += 1;
+          if (error instanceof BackendRequestError && error.reason === "connection_draining") {
+            if (slot) slot.draining = true;
+          } else if (!isTransient(error)) throw error;
+          if (failures >= FIRST_ATTACH_ATTEMPTS) throw error;
+          await sleep(backoff(failures));
+        } finally {
+          if (slot) this.#maybeIdle(slot);
+        }
+      }
+    } catch (error) {
+      if (this.#connectors.get(connector.name) === connector) void this.#withdrawAll(connector);
+      throw error;
+    } finally {
+      this.#pendingServe.delete(connector);
+    }
+  }
+
+  /** Stop serving a Connector on every connection. Best effort: a lost connection ends it anyway. */
+  async withdraw(connector: PoolConnector): Promise<void> {
+    if (this.#connectors.get(connector.name) !== connector) return;
+    await this.#withdrawAll(connector);
+  }
+
+  /**
    * End every attachment with reason `closed`, release them and close the
    * connections. Later attaches are refused.
    */
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    const connectors = [...this.#connectors.values()];
+    this.#connectors.clear();
+    for (const connector of connectors) safely(() => connector.ended({ reason: "closed" }));
     const attachments = [...this.#wanted.values()];
     this.#wanted.clear();
     const detaches: Promise<unknown>[] = [];
@@ -382,6 +474,101 @@ export class BackendConnectionPool {
     }
   }
 
+  /** Whether new requests may go to this connection. */
+  #serves(slot: Slot): boolean {
+    return this.#slots.has(slot) && slot.transport.open && !slot.draining;
+  }
+
+  /** Declare a Connector on one connection; repeated calls share the declaration. */
+  #declare(slot: Slot, connector: PoolConnector): Promise<string> {
+    const existing = slot.serving.get(connector.name);
+    if (existing) return existing;
+    const declaration = slot.transport
+      .request("connector.serve", connector.serveParams)
+      .then((result) => {
+        if (!isServeResult(result))
+          throw new TiDBLinkError("connector.serve returned an invalid result");
+        return result.connectorId;
+      });
+    slot.serving.set(connector.name, declaration);
+    declaration.catch(() => {
+      if (slot.serving.get(connector.name) === declaration) slot.serving.delete(connector.name);
+    });
+    return declaration;
+  }
+
+  /**
+   * Declare a Connector on a further connection. A lost or draining
+   * connection is replaced and declares it again; a transient refusal is
+   * retried on the same connection; other failures are reported.
+   */
+  async #declareQuietly(slot: Slot, connector: PoolConnector): Promise<void> {
+    for (let failures = 0; ; ) {
+      try {
+        await this.#declare(slot, connector);
+        return;
+      } catch (error) {
+        if (this.#connectors.get(connector.name) !== connector) return;
+        if (error instanceof BackendConnectionClosedError) return;
+        if (error instanceof BackendRequestError && error.reason === "connection_draining") return;
+        if (isTransient(error) && this.#serves(slot)) {
+          // The connection stays open: serve it there again later.
+          await sleep(backoff(++failures));
+          if (this.#connectors.get(connector.name) !== connector || !this.#serves(slot)) return;
+          continue;
+        }
+        if (!this.#pendingServe.has(connector)) safely(() => connector.report(error));
+        return;
+      }
+    }
+  }
+
+  async #withdrawAll(connector: PoolConnector): Promise<void> {
+    this.#connectors.delete(connector.name);
+    const withdrawals: Promise<unknown>[] = [];
+    for (const slot of this.#slots) {
+      if (!slot.serving.delete(connector.name)) continue;
+      if (slot.transport.open)
+        withdrawals.push(
+          slot.transport
+            .request("connector.withdraw", { name: connector.name })
+            .catch(() => undefined),
+        );
+    }
+    await Promise.allSettled(withdrawals);
+    for (const slot of this.#slots) this.#maybeIdle(slot);
+  }
+
+  /**
+   * Keep one connection open while Connectors are served: reopen after the
+   * last one was lost or started draining. The new connection declares them.
+   */
+  async #keepServing(): Promise<void> {
+    if (this.#reopening) return;
+    this.#reopening = true;
+    try {
+      for (let failures = 0; this.#connectors.size && !this.#closed; failures++) {
+        if ([...this.#slots].some((slot) => this.#serves(slot))) return;
+        try {
+          await this.#openShared();
+          return;
+        } catch (error) {
+          if (this.#closed) return;
+          if (!isTransient(error)) {
+            const connectors = [...this.#connectors.values()];
+            this.#connectors.clear();
+            for (const connector of connectors)
+              safely(() => connector.ended({ reason: "error", error }));
+            return;
+          }
+          await sleep(backoff(failures));
+        }
+      }
+    } finally {
+      this.#reopening = false;
+    }
+  }
+
   async #limited<T>(task: () => Promise<T>): Promise<T> {
     if (this.#attaching >= ATTACH_CONCURRENCY)
       await new Promise<void>((resolve) => this.#attachQueue.push(resolve));
@@ -411,6 +598,12 @@ export class BackendConnectionPool {
         }
       await this.#openShared();
     }
+  }
+
+  /** An open connection that takes new requests, opened if there is none. */
+  async #servingSlot(): Promise<Slot> {
+    for (const slot of this.#slots) if (this.#serves(slot)) return slot;
+    return this.#openShared();
   }
 
   async #anySlot(): Promise<Slot> {
@@ -459,6 +652,7 @@ export class BackendConnectionPool {
       full: false,
       draining: false,
       idleTimer: undefined,
+      serving: new Map(),
     };
     if (this.#closed) {
       transport.close(1000, "client closed");
@@ -467,6 +661,7 @@ export class BackendConnectionPool {
     this.#slots.add(slot);
     const opened = slot;
     void transport.closed.then((error) => this.#lost(opened, error));
+    for (const connector of this.#connectors.values()) void this.#declareQuietly(slot, connector);
     this.#maybeIdle(slot);
     return slot;
   }
@@ -475,6 +670,17 @@ export class BackendConnectionPool {
     if (method === "connection.drain") {
       const closeAfterMs = Number(params.closeAfterMs);
       this.#drain(slot, Number.isFinite(closeAfterMs) ? closeAfterMs : 0);
+      return;
+    }
+    // A Connector call needs no attachment: route it by the Connector it names.
+    if (method === "tool.call" && params.connector !== undefined) {
+      const name =
+        typeof params.connector === "object" && params.connector !== null
+          ? (params.connector as { name?: unknown }).name
+          : undefined;
+      const connector = typeof name === "string" ? this.#connectors.get(name) : undefined;
+      // Withdrawn here: unclaimed, the call ends as not performed.
+      if (connector) safely(() => connector.call(params, slot.transport));
       return;
     }
     const sessionId = params.sessionId;
@@ -504,10 +710,12 @@ export class BackendConnectionPool {
     const moving = [...slot.held.values()];
     // Stop routing now: each re-attach resumes from what its Session processed.
     slot.held.clear();
-    const moves = moving.map((attachment) => {
+    const moves: Promise<void>[] = moving.map((attachment) => {
       this.#where.delete(attachment);
       return this.#recover(attachment, 0);
     });
+    // Serve the Connectors on another connection before this one closes.
+    moves.push(this.#keepServing());
     void (async () => {
       await Promise.allSettled(moves);
       // Let claims and results in flight finish, then close before the core does.
@@ -532,6 +740,15 @@ export class BackendConnectionPool {
         safely(() => attachment.ended({ reason: "error", error }));
       }
     }
+    if (!this.#connectors.size || this.#closed) return;
+    if (error.retryable) {
+      void this.#keepServing();
+    } else if (![...this.#slots].some((other) => this.#serves(other))) {
+      // The Key no longer works: no connection can serve them.
+      const connectors = [...this.#connectors.values()];
+      this.#connectors.clear();
+      for (const connector of connectors) safely(() => connector.ended({ reason: "error", error }));
+    }
   }
 
   #release(slot: Slot, sessionId: string): void {
@@ -544,11 +761,22 @@ export class BackendConnectionPool {
     slot.idleTimer = undefined;
   }
 
+  /** The only connection serving the Connectors stays open while any is served. */
+  #keepsServing(slot: Slot): boolean {
+    return (
+      this.#connectors.size > 0 &&
+      this.#serves(slot) &&
+      ![...this.#slots].some((other) => other !== slot && this.#serves(other))
+    );
+  }
+
   #maybeIdle(slot: Slot): void {
     if (slot.idleTimer || !this.#slots.has(slot) || slot.held.size || slot.reserved) return;
+    if (this.#keepsServing(slot)) return;
     slot.idleTimer = setTimeout(() => {
       slot.idleTimer = undefined;
       if (!this.#slots.has(slot) || slot.held.size || slot.reserved) return;
+      if (this.#keepsServing(slot)) return;
       // Claims and results may still be in flight; look again later.
       if (slot.transport.pendingRequests) return this.#maybeIdle(slot);
       this.#slots.delete(slot);

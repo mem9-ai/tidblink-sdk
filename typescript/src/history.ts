@@ -202,6 +202,15 @@ export interface TurnFailure {
       | "sandbox_unconfigured"
       | "drive9_unconfigured"
       | "drive9_disabled_for_organization";
+    /**
+     * With code `mcp_authorization_required`: each MCP Server Registration the
+     * Turn needs whose authorization is not usable.
+     */
+    registrations?: {
+      serverId: string;
+      owner: "organization" | "end_user";
+      reason: "missing" | "invalid" | "revoked" | "insufficient_scope";
+    }[];
     provider?: {
       category:
         | "authentication"

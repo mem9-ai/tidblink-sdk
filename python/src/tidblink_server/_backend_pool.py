@@ -24,6 +24,8 @@ __all__ = [
     "BackendLink",
     "BackendWebSocket",
     "PoolAttachment",
+    "PoolConnector",
+    "ServedConnectorEnd",
     "SessionConnectionEnd",
     "WebSocketConnect",
 ]
@@ -43,6 +45,19 @@ class SessionConnectionEnd:
     """
 
     reason: Literal["closed", "superseded", "session_deleted", "error"]
+    error: BaseException | None = None
+
+
+@dataclass(frozen=True)
+class ServedConnectorEnd:
+    """Why a served Connector stopped being served.
+
+    ``reason`` is ``closed`` (``close()`` or ``OrganizationClient.close()``)
+    or ``error``: no connection could serve it any more, for example after
+    the Organization API Key was revoked; ``error`` then holds why.
+    """
+
+    reason: Literal["closed", "error"]
     error: BaseException | None = None
 
 
@@ -85,6 +100,34 @@ class PoolAttachment(Protocol):
         ...
 
 
+class PoolConnector(Protocol):
+    """The pool's view of one Connector this process serves.
+
+    The pool declares it on every Backend Connection; a served Connector
+    implements it.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def serve_params(self) -> Mapping[str, Any]:
+        """Parameters of every ``connector.serve``."""
+        ...
+
+    def call(self, params: dict[str, Any], link: BackendLink) -> None:
+        """A ``tool.call`` for this Connector from the connection that delivered it."""
+        ...
+
+    def report(self, error: BaseException) -> None:
+        """A declaration failed on one connection without ending the Connector."""
+        ...
+
+    def ended(self, end: ServedConnectorEnd) -> None:
+        """The pool gave the Connector up; called at most once, never after ``withdraw()``."""
+        ...
+
+
 DEFAULT_IDLE_CLOSE = 5.0
 #: Attempts of a first attach before its caller sees the failure.
 FIRST_ATTACH_ATTEMPTS = 3
@@ -109,6 +152,10 @@ def _is_transient(error: BaseException) -> bool:
     )
 
 
+def _is_serve_result(value: object) -> bool:
+    return isinstance(value, dict) and isinstance(value.get("connectorId"), str) and value["connectorId"] != ""
+
+
 def _is_attach_result(value: object) -> bool:
     if not isinstance(value, dict):
         return False
@@ -131,7 +178,7 @@ def _safely(callback: Callable[[], object]) -> None:
 
 
 class _Slot:
-    __slots__ = ("transport", "held", "reserved", "full", "draining", "idle_timer")
+    __slots__ = ("transport", "held", "reserved", "full", "draining", "idle_timer", "serving")
 
     def __init__(self, transport: BackendTransport) -> None:
         self.transport = transport
@@ -144,6 +191,8 @@ class _Slot:
         #: The core sent `connection.drain`; nothing new goes here.
         self.draining = False
         self.idle_timer: asyncio.TimerHandle | None = None
+        #: Connectors declared, or being declared, on this connection, by name.
+        self.serving: dict[str, asyncio.Future[str]] = {}
 
 
 class BackendConnectionPool:
@@ -153,9 +202,12 @@ class BackendConnectionPool:
     announces; further attachments open another connection, which the load
     balancer may place on another replica. A lost connection's attachments
     re-attach elsewhere with their latest parameters; ``connection.drain``
-    moves them before the core closes the connection. Connections that hold
-    nothing close after a short idle period. Background work runs in tasks
-    the pool owns; :meth:`close` ends them.
+    moves them before the core closes the connection. Served Connectors are
+    declared on every connection, so that a connection executing a Session
+    also serves its Connector calls, and are declared again on each new one.
+    Connections that hold nothing close after a short idle period, except the
+    last one while a Connector is served. Background work runs in tasks the
+    pool owns; :meth:`close` ends them.
     """
 
     def __init__(
@@ -178,6 +230,11 @@ class BackendConnectionPool:
         self._wanted: dict[str, PoolAttachment] = {}
         #: The connection currently routing each attachment.
         self._where: dict[PoolAttachment, _Slot] = {}
+        #: Connectors this process serves, by name.
+        self._connectors: dict[str, PoolConnector] = {}
+        #: Connectors whose ``serve()`` has not returned: it reports their failures.
+        self._pending_serve: set[PoolConnector] = set()
+        self._reopening = False
         self._opening: asyncio.Future[_Slot] | None = None
         self._open_failures = 0
         self._attach_limit: asyncio.Semaphore | None = None
@@ -339,14 +396,75 @@ class BackendConnectionPool:
                 self._maybe_idle(slot)
             failures += 1
 
-    async def close(self) -> None:
-        """End every attachment with reason ``closed``, release them and close the connections.
+    async def serve(self, connector: PoolConnector) -> str:
+        """Serve a Connector on every connection, now and on each one opened later.
 
-        Later attaches are refused. Background work still running is cancelled.
+        It is served until :meth:`withdraw` or until the pool gives it up
+        through ``ended()``. Returns its connectorId once one connection
+        serves it; raises when the first declaration fails. One Connector per
+        name is allowed at a time.
+        """
+        if self._closed:
+            raise TiDBLinkError("This OrganizationClient is closed")
+        name = connector.name
+        if name in self._connectors:
+            raise TiDBLinkError(f"Connector {name} is already served through this OrganizationClient; close it first")
+        self._connectors[name] = connector
+        self._pending_serve.add(connector)
+        try:
+            failures = 0
+            while True:
+                if self._connectors.get(name) is not connector:
+                    raise TiDBLinkError("The Connector was closed while it was being served")
+                slot: _Slot | None = None
+                try:
+                    slot = await self._serving_slot()
+                    self._cancel_idle(slot)
+                    connector_id = await asyncio.shield(self._declare(slot, connector))
+                    for other in list(self._slots):
+                        if other is not slot and self._serves(other):
+                            self._declare_quietly(other, connector)
+                    return connector_id
+                except Exception as error:
+                    failures += 1
+                    if isinstance(error, BackendRequestError) and error.reason == "connection_draining":
+                        if slot is not None:
+                            slot.draining = True
+                    elif not _is_transient(error):
+                        raise
+                    if failures >= FIRST_ATTACH_ATTEMPTS:
+                        raise
+                    await asyncio.sleep(_backoff(failures))
+                finally:
+                    if slot is not None:
+                        self._maybe_idle(slot)
+        except BaseException:
+            if self._connectors.get(name) is connector:
+                # Forget it at once, so that the name can be served again; withdraw in the background.
+                self.spawn(self._await_withdrawals(self._withdraw_everywhere(connector)))
+            raise
+        finally:
+            self._pending_serve.discard(connector)
+
+    async def withdraw(self, connector: PoolConnector) -> None:
+        """Stop serving a Connector on every connection. Best effort: a lost connection ends it anyway."""
+        if self._connectors.get(connector.name) is not connector:
+            return
+        await self._await_withdrawals(self._withdraw_everywhere(connector))
+
+    async def close(self) -> None:
+        """End every attachment and served Connector with reason ``closed``, release them and close the connections.
+
+        Later attaches and serves are refused. Background work still running
+        is cancelled.
         """
         if self._closed:
             return
         self._closed = True
+        connectors = list(self._connectors.values())
+        self._connectors.clear()
+        for connector in connectors:
+            _safely(lambda connector=connector: connector.ended(ServedConnectorEnd("closed")))
         attachments = list(self._wanted.values())
         self._wanted.clear()
         detaches: list[asyncio.Future[Any]] = []
@@ -472,6 +590,142 @@ class BackendConnectionPool:
                     return slot
             await self._open_shared()
 
+    def _serves(self, slot: _Slot) -> bool:
+        """Whether new requests may go to this connection."""
+        return slot in self._slots and slot.transport.open and not slot.draining
+
+    async def _serving_slot(self) -> _Slot:
+        """An open connection that takes new requests, opened if there is none."""
+        for slot in self._slots:
+            if self._serves(slot):
+                return slot
+        return await self._open_shared()
+
+    def _declare(self, slot: _Slot, connector: PoolConnector) -> asyncio.Future[str]:
+        """Declare a Connector on one connection; repeated calls share the declaration.
+
+        Await it through ``asyncio.shield``: it is shared.
+        """
+        name = connector.name
+        existing = slot.serving.get(name)
+        if existing is not None:
+            return existing
+        declaration: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        silence(declaration)
+
+        def settle(answer: asyncio.Future[Any]) -> None:
+            if declaration.done():
+                return
+            error: BaseException | None
+            if answer.cancelled():
+                error = TiDBLinkError("connector.serve was cancelled")
+            else:
+                error = answer.exception()
+                if error is None and not _is_serve_result(answer.result()):
+                    error = TiDBLinkError("connector.serve returned an invalid result")
+            if error is None:
+                declaration.set_result(answer.result()["connectorId"])
+                return
+            if slot.serving.get(name) is declaration:
+                del slot.serving[name]
+            declaration.set_exception(error)
+
+        slot.serving[name] = declaration
+        slot.transport.request("connector.serve", connector.serve_params).add_done_callback(settle)
+        return declaration
+
+    def _declare_quietly(self, slot: _Slot, connector: PoolConnector) -> None:
+        """Declare a Connector on a further connection.
+
+        A transient refusal is retried there while the connection still
+        serves; a lost or draining connection is replaced and declares it
+        again; other failures are reported.
+        """
+        # Start now, so that a concurrent declaration on this connection shares it.
+        self.spawn(self._settle_declaration(slot, connector, self._declare(slot, connector)))
+
+    async def _settle_declaration(
+        self, slot: _Slot, connector: PoolConnector, declaration: asyncio.Future[str]
+    ) -> None:
+        failures = 0
+        while True:
+            try:
+                await asyncio.shield(declaration)
+                return
+            except Exception as error:
+                if self._connectors.get(connector.name) is not connector:
+                    return
+                if isinstance(error, BackendConnectionClosedError) or (
+                    isinstance(error, BackendRequestError) and error.reason == "connection_draining"
+                ):
+                    return
+                if _is_transient(error) and self._serves(slot):
+                    # The connection stays open: serve it there again later.
+                    failures += 1
+                    await asyncio.sleep(_backoff(failures))
+                    if self._connectors.get(connector.name) is not connector or not self._serves(slot):
+                        return
+                    declaration = self._declare(slot, connector)
+                    continue
+                if connector not in self._pending_serve:
+                    _safely(lambda: connector.report(error))
+                return
+
+    def _withdraw_everywhere(self, connector: PoolConnector) -> list[asyncio.Future[Any]]:
+        """Stop serving a Connector now; returns the ``connector.withdraw`` requests sent."""
+        name = connector.name
+        if self._connectors.get(name) is connector:
+            del self._connectors[name]
+        withdrawals: list[asyncio.Future[Any]] = []
+        for slot in self._slots:
+            if slot.serving.pop(name, None) is None:
+                continue
+            if slot.transport.open:
+                withdrawals.append(silence(slot.transport.request("connector.withdraw", {"name": name})))
+        return withdrawals
+
+    async def _await_withdrawals(self, withdrawals: list[asyncio.Future[Any]]) -> None:
+        try:
+            if withdrawals:
+                await asyncio.wait(withdrawals)
+        finally:
+            for slot in list(self._slots):
+                self._maybe_idle(slot)
+
+    def _end_connectors(self, error: BaseException) -> None:
+        connectors = list(self._connectors.values())
+        self._connectors.clear()
+        for connector in connectors:
+            _safely(lambda connector=connector: connector.ended(ServedConnectorEnd("error", error)))
+
+    async def _keep_serving(self) -> None:
+        """Keep one connection open while Connectors are served.
+
+        Reopens after the last one was lost or started draining; the new
+        connection declares them.
+        """
+        if self._reopening:
+            return
+        self._reopening = True
+        try:
+            failures = 0
+            while self._connectors and not self._closed:
+                if any(self._serves(slot) for slot in self._slots):
+                    return
+                try:
+                    await self._open_shared()
+                    return
+                except Exception as error:
+                    if self._closed:
+                        return
+                    if not _is_transient(error):
+                        self._end_connectors(error)
+                        return
+                    await asyncio.sleep(_backoff(failures))
+                failures += 1
+        finally:
+            self._reopening = False
+
     async def _any_slot(self) -> _Slot:
         fallback: _Slot | None = None
         for slot in self._slots:
@@ -537,6 +791,8 @@ class BackendConnectionPool:
         self._slots[slot] = None
         opened = slot
         transport.closed.add_done_callback(lambda done: self._lost(opened, done.result()))
+        for connector in list(self._connectors.values()):
+            self._declare_quietly(slot, connector)
         self._maybe_idle(slot)
         return slot
 
@@ -554,6 +810,15 @@ class BackendConnectionPool:
             close_after = params.get("closeAfterMs")
             finite = isinstance(close_after, (int, float)) and not isinstance(close_after, bool)
             self._drain(slot, float(close_after) / 1000 if finite else 0.0)  # type: ignore[arg-type]
+            return
+        # A Connector call needs no attachment: route it by the Connector it names.
+        if method == "tool.call" and "connector" in params:
+            reference = params["connector"]
+            name = reference.get("name") if isinstance(reference, dict) else None
+            connector = self._connectors.get(name) if isinstance(name, str) else None
+            # Withdrawn here: unclaimed, the call ends as not performed.
+            if connector is not None:
+                _safely(lambda: connector.call(params, slot.transport))  # type: ignore[union-attr]
             return
         session_id = params.get("sessionId")
         if not isinstance(session_id, str):
@@ -587,6 +852,9 @@ class BackendConnectionPool:
         for attachment in moving:
             self._where.pop(attachment, None)
             moves.append(self.spawn(self._recover(attachment, 0)))
+        # Serve the Connectors on another connection before this one closes.
+        if self._connectors:
+            moves.append(self.spawn(self._keep_serving()))
 
         async def close_when_moved() -> None:
             if moves:
@@ -612,6 +880,13 @@ class BackendConnectionPool:
             else:
                 del self._wanted[attachment.session_id]
                 _safely(lambda attachment=attachment: attachment.ended(SessionConnectionEnd("error", error)))
+        if not self._connectors or self._closed:
+            return
+        if error.retryable:
+            self.spawn(self._keep_serving())
+        elif not any(self._serves(other) for other in self._slots):
+            # The Key no longer works: no connection can serve them.
+            self._end_connectors(error)
 
     def _release(self, slot: _Slot, session_id: str) -> None:
         slot.held.pop(session_id, None)
@@ -622,13 +897,25 @@ class BackendConnectionPool:
             slot.idle_timer.cancel()
             slot.idle_timer = None
 
+    def _keeps_serving(self, slot: _Slot) -> bool:
+        """The only connection serving the Connectors stays open while any is served."""
+        return (
+            bool(self._connectors)
+            and self._serves(slot)
+            and not any(other is not slot and self._serves(other) for other in self._slots)
+        )
+
     def _maybe_idle(self, slot: _Slot) -> None:
         if slot.idle_timer is not None or slot not in self._slots or slot.held or slot.reserved:
+            return
+        if self._keeps_serving(slot):
             return
 
         def idle() -> None:
             slot.idle_timer = None
             if slot not in self._slots or slot.held or slot.reserved:
+                return
+            if self._keeps_serving(slot):
                 return
             # Claims and results may still be in flight; look again later.
             if slot.transport.pending_requests:

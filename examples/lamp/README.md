@@ -34,7 +34,8 @@ reference disagree, fix one of them in the same change.
 - For voice the backend hands the lamp a short-lived Realtime grant. The lamp
   opens the Realtime WebSocket itself; audio never passes through the backend.
 - Cloud capabilities, such as a warranty lookup, belong in a Connector that the
-  Template references, not in the lamp's tools.
+  backend serves (see the [Serve a Connector](../README.md#scenarios) example)
+  and the Template references, not in the lamp's tools.
 - Each lamp model has its own Template, so a model's personality, instructions
   and Connectors are configured apart from the others. One Organization API Key
   uses any number of the Organization's Templates. A lamp's Session starts on
