@@ -358,3 +358,36 @@ test("send() resolves only once the Session released the Turn, or with the resul
   const reply = await conn.send("Too bright", { clientEventId: "msg_1", timeoutMs: 300 });
   assert.equal(reply.text, "Dimmed to 40%.");
 });
+
+test("a send stopped while its answer is outstanding has an unknown outcome, not a plain timeout", async () => {
+  const server = await start({
+    // The core received the message but has not answered yet.
+    respond: (message) => (message.method === "session.send" ? "silent" : undefined),
+  });
+  const conn = await sessionOf(server).connect();
+  await assert.rejects(
+    conn.send("x", { clientEventId: "msg_1", timeoutMs: 50 }),
+    (error) =>
+      error instanceof TurnWaitTimeoutError &&
+      error.inputId === "msg_1" &&
+      error.sessionId === "sess_1" &&
+      error.cause?.name === "TimeoutError",
+  );
+  const controller = new AbortController();
+  const pending = conn.send("x", { clientEventId: "msg_2", signal: controller.signal });
+  await until(() => methodOf(server.peers[0], "session.send").length === 2);
+  controller.abort();
+  await assert.rejects(
+    pending,
+    (error) =>
+      error instanceof OutcomeUnknownError &&
+      !(error instanceof TurnWaitTimeoutError) &&
+      error.inputId === "msg_2",
+  );
+  // Stopped before anything was sent: the message certainly did not reach the core.
+  await assert.rejects(
+    conn.send("x", { clientEventId: "msg_3", signal: AbortSignal.abort() }),
+    (error) => error.name === "AbortError",
+  );
+  assert.equal(methodOf(server.peers[0], "session.send").length, 2);
+});
