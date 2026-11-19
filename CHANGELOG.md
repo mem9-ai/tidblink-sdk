@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.0-rc.1
+
+Prerelease on the `next` dist-tag.
+
 - Align with service
   [07d1f9c8](https://github.com/mem9-ai/agent-stack/commit/07d1f9c85c0fedd729c76c4cb4a48485d139c8ff),
   OpenAPI SHA-256
