@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { createServer } from "node:http";
 import { OrganizationClient, TiDBLinkApiError } from "@tidblink/server";
 import { createSessionWorkflow } from "@tidblink/server/examples/create-session.mjs";
 
@@ -156,86 +155,76 @@ await until(
   () => session.refresh(),
   (current) => current.data.activeTurnId === null,
 );
-// An Organization registers and activates an HTTP Connector, and an Agent calls it.
-const { createConnectorHandler } = await import(
-  "@tidblink/server/examples/http-connector.mjs"
+// An Organization serves a Connector over its Backend Connections, and a Session calls it.
+const { serveOrdersConnector, memoryOrders } = await import(
+  "@tidblink/server/examples/serve-connector.mjs"
 );
-const { organizationId } = await organization.getOrganization();
-let connector = await organization.connectors.register({
-  displayName: "SDK Orders",
-  endpointUrl: process.env.SDK_CONNECTOR_ENDPOINT,
+const orderReads = [];
+const sample = memoryOrders({
+  [user.userId]: [{ orderId: "order_7", status: "SDK_CONNECTOR_RESULT" }],
 });
-assert.equal(connector.status, "inactive");
-assert.equal(connector.transport, "streamable_http");
-const connectorCalls = [];
-const connectorServer = createServer(
-  createConnectorHandler({
-    baseUrl,
-    organizationId,
-    connectorId: connector.connectorId,
-    name: "SDK Orders",
-    tools: {
-      lookup_order: {
-        description: "Look up one of the user's orders",
-        inputSchema: {
-          type: "object",
-          properties: { orderId: { type: "string" } },
-          required: ["orderId"],
-        },
-        run: async ({ orderId }, context) => {
-          connectorCalls.push({ orderId, context });
-          return `SDK_CONNECTOR_RESULT ${orderId}`;
-        },
-      },
+const connectorErrors = [];
+const served = await serveOrdersConnector({
+  organization,
+  name: "sdk_orders",
+  orders: {
+    listOrders: sample.listOrders,
+    getOrder: async (userId, orderId, options) => {
+      orderReads.push({ userId, orderId });
+      return sample.getOrder(userId, orderId, options);
     },
-  }),
+  },
+  onError: (error) => connectorErrors.push(error),
+});
+assert.match(served.connectorId, /^conn_/u);
+const connector = await organization.connectors.get(served.connectorId);
+assert.equal(connector.transport, "backend_connection");
+assert.equal(connector.status, "active");
+assert.equal(connector.observation, null);
+// Another Key of the same Organization reads the same Connector.
+assert(
+  (await otherOrganization.connectors.list()).some(
+    (item) => item.connectorId === served.connectorId,
+  ),
 );
-await new Promise((resolve) =>
-  connectorServer.listen(Number(process.env.SDK_CONNECTOR_PORT), "127.0.0.1", resolve),
+const connectorTemplateId = await stage("connector", served.connectorId);
+const connectorSession = await owner.createSession({
+  templateId: connectorTemplateId,
+  idempotencyKey: randomUUID(),
+});
+assert.equal(
+  (
+    await connectorSession.turn(
+      { clientEventId: randomUUID(), text: "Where is order 7?" },
+      { timeoutMs: 20000, pollIntervalMs: 25 },
+    )
+  ).text,
+  "Connector order shipped.",
 );
-try {
-  connector = await organization.connectors.activate(connector.connectorId, {
-    expectedConnectorVersion: connector.connectorVersion,
-  });
-  assert.equal(connector.status, "active");
-  assert(connector.observation);
-  assert(
-    (await organization.connectors.list()).some(
-      (item) => item.connectorId === connector.connectorId,
-    ),
-  );
-  // Another Key of the same Organization manages the same registration.
-  assert.equal(
-    (await otherOrganization.connectors.get(connector.connectorId)).status,
-    "active",
-  );
-  const connectorTemplateId = await stage("connector", connector.connectorId);
-  const connectorSession = await owner.createSession({
-    templateId: connectorTemplateId,
-    idempotencyKey: randomUUID(),
-  });
-  assert.equal(
-    (
-      await connectorSession.turn(
-        { clientEventId: randomUUID(), text: "Where is order 7?" },
-        { timeoutMs: 20000, pollIntervalMs: 25 },
-      )
-    ).text,
-    "Connector order shipped.",
-  );
-  assert.equal(connectorCalls.length, 1);
-  assert.equal(connectorCalls[0].orderId, "order_7");
-  assert.equal(connectorCalls[0].context.userId, user.userId);
-  assert.equal(connectorCalls[0].context.sessionId, connectorSession.id);
-  assert.equal(connectorCalls[0].context.organizationId, organizationId);
-  connector = await organization.connectors.deactivate(connector.connectorId, {
-    expectedConnectorVersion: connector.connectorVersion,
-  });
-  assert.equal(connector.status, "inactive");
-} finally {
-  connectorServer.closeAllConnections();
-  await new Promise((resolve) => connectorServer.close(resolve));
-}
+assert.deepEqual(orderReads, [{ userId: user.userId, orderId: "order_7" }]);
+// No process serves the Connector: its call is not performed and the Turn goes on.
+await served.close();
+assert.deepEqual(await served.closed, { reason: "closed" });
+await until(
+  () => connectorSession.refresh(),
+  (current) => current.data.activeTurnId === null,
+);
+await stage("connector_offline");
+assert.equal(
+  (
+    await connectorSession.turn(
+      { clientEventId: randomUUID(), text: "And order 8?" },
+      { timeoutMs: 20000, pollIntervalMs: 25 },
+    )
+  ).text,
+  "Connector unavailable.",
+);
+assert.equal(orderReads.length, 1);
+assert.deepEqual(connectorErrors, []);
+await until(
+  () => connectorSession.refresh(),
+  (current) => current.data.activeTurnId === null,
+);
 
 await stage("audio");
 const wav = Buffer.alloc(364);
@@ -321,7 +310,7 @@ await stage("revoke");
 await assert.rejects(fresh.listSessions(), unauthorized);
 assert.equal((await other.getSession(session.id)).id, session.id);
 console.log(
-  "Packed Organization consumer passed: provisioning, discovery, creation replay, ownership, file transfer/attachment, text/history, Client Tools on a Backend Connection, an HTTP Connector call, audio, Realtime HTTP, and rotation/revocation recovery.",
+  "Packed Organization consumer passed: provisioning, discovery, creation replay, ownership, file transfer/attachment, text/history, Client Tools on a Backend Connection, a served Connector called and then unavailable, audio, Realtime HTTP, and rotation/revocation recovery.",
 );
 await organization.close();
 process.disconnect();

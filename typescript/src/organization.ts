@@ -10,6 +10,11 @@ import { EndUserClient } from "./user.js";
 import { Templates } from "./templates.js";
 import { Skills } from "./skills.js";
 import { Connectors } from "./connectors.js";
+import {
+  serveConnector,
+  type ServeConnectorOptions,
+  type ServedConnector,
+} from "./connector-serve.js";
 import { OutcomeUnknownError } from "./errors.js";
 import { BackendConnectionPool } from "./backend-pool.js";
 import type { WebSocketConstructor } from "./backend-connection.js";
@@ -93,7 +98,7 @@ export class OrganizationClient {
     return this.#skills;
   }
 
-  /** Organization Connectors: MCP tool servers that Agents call. */
+  /** Read the Organization's Connectors. Serve one with `serveConnector`. */
   get connectors(): Connectors {
     return this.#connectors;
   }
@@ -128,12 +133,25 @@ export class OrganizationClient {
   }
 
   /**
-   * Close every Session connection opened through this client, with reason
-   * `closed`, and its Backend Connections. Later `connect()` calls are
-   * refused; REST calls keep working.
+   * Close every Session connection opened through this client and stop
+   * serving its Connectors, both with reason `closed`, and close its Backend
+   * Connections. Later `connect()` and `serveConnector()` calls are refused;
+   * REST calls keep working.
    */
   close(): Promise<void> {
     return this.#backend.close();
+  }
+
+  /**
+   * Serve a Connector's functions from this process over its Backend
+   * Connections, creating the Organization's Connector with this name if it
+   * has none. Sessions whose Template references `connectorId` call them as
+   * `mcp_<name>__<function>`, from any End User's Session, with the same claim,
+   * deadline and result rules as Client Tools. Serving keeps a connection open
+   * until `close()`.
+   */
+  serveConnector(options: ServeConnectorOptions): Promise<ServedConnector> {
+    return serveConnector(this.#backend, options);
   }
 
   /** Select the End User who owns the resources; the Organization API Key remains the caller. */

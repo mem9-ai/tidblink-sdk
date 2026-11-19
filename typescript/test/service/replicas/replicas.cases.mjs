@@ -9,10 +9,10 @@ const replicaB = process.env.SDK_REPLICA_URL;
 const apiKey = process.env.SDK_ORGANIZATION_KEY;
 assert(replicaA && replicaB && apiKey, "Run this through npm run test:service");
 
-const stage = (name) =>
+const stage = (name, extra = {}) =>
   new Promise((resolve, reject) => {
-    process.once("message", ({ error }) => (error ? reject(new Error(error)) : resolve()));
-    process.send({ stage: name });
+    process.once("message", ({ value, error }) => (error ? reject(new Error(error)) : resolve(value)));
+    process.send({ stage: name, ...extra });
   });
 const until = async (condition, what, timeoutMs = 60000) => {
   const end = Date.now() + timeoutMs;
@@ -128,6 +128,45 @@ try {
   assert.deepEqual(cursors(lampEvents), cursors(observed));
   assert(lampEvents.some((event) => event.type === "agent.session.turn.requires_action"));
 
+  // 1b. The backend serves a Connector through the balancer (replica B); a Turn
+  // on replica A of a Session nobody attached calls it there.
+  const connectorRuns = [];
+  const served = await behindBalancer.serveConnector({
+    name: "sdk_replicas",
+    tools: {
+      lookup_order: {
+        description: "Look up one of the user's orders",
+        parameters: {
+          type: "object",
+          properties: { orderId: { type: "string" } },
+          required: ["orderId"],
+          additionalProperties: false,
+        },
+        run: async (args, context) => {
+          connectorRuns.push({ args, context });
+          return `Order ${args.orderId} shipped`;
+        },
+      },
+    },
+  });
+  let servedEnded;
+  served.closed.then((end) => (servedEnded = end));
+  const connectorTemplateId = await stage("connector", { connectorId: served.connectorId });
+  const shop = await onA.user(userId).createSession({
+    templateId: connectorTemplateId,
+    idempotencyKey: randomUUID(),
+  });
+  const ordered = await onA
+    .user(userId)
+    .session(shop.id)
+    .turn({ clientEventId: randomUUID(), text: "Where is order 7?" }, { timeoutMs: 30000, pollIntervalMs: 50 });
+  assert.equal(ordered.text, "Order found.");
+  assert.equal(connectorRuns.length, 1);
+  assert.deepEqual(connectorRuns[0].args, { orderId: "order_7" });
+  assert.equal(connectorRuns[0].context.userId, userId);
+  assert.equal(connectorRuns[0].context.sessionId, shop.id);
+  assert.deepEqual(connectorRuns[0].context.connector, { id: served.connectorId, name: "sdk_replicas" });
+
   // 2. Replica B drains and stops: the lamp's attachment moves to replica A.
   const before = lamp.generation;
   await stage("stopB");
@@ -137,6 +176,17 @@ try {
   const second = await lamp.send("Still too bright", { timeoutMs: 30000 });
   assert.equal(second.text, "Dimmed again.");
   assert.equal(runs.length, 2);
+  // The Connector is declared again on replica A and keeps serving.
+  await stage("connectorAgain");
+  const reordered = await onA
+    .user(userId)
+    .session(shop.id)
+    .turn({ clientEventId: randomUUID(), text: "And order 8?" }, { timeoutMs: 30000, pollIntervalMs: 50 });
+  assert.equal(reordered.text, "Order found again.");
+  assert.equal(connectorRuns.length, 2);
+  assert.deepEqual(connectorRuns[1].args, { orderId: "order_8" });
+  assert.equal(servedEnded, undefined, "a drain moves the Connector, it does not end it");
+  await served.close();
 
   // 3. The network drops the lamp's connection while a Turn runs: send() still
   // gets its answer from the events replayed after the reconnect.
@@ -162,7 +212,7 @@ try {
   assert.deepEqual(await lamp.closed, { reason: "superseded" });
   assert(taker.generation > lamp.generation);
   console.log(
-    "Replicas consumer passed: cross-replica tool calls and events, drain to another replica, reconnect replay, supersession.",
+    "Replicas consumer passed: cross-replica tool calls, Connector calls and events, drain to another replica, reconnect replay, supersession.",
   );
 } finally {
   await Promise.all([onA.close(), behindBalancer.close(), elsewhere.close()]);

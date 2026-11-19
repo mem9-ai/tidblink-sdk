@@ -56,15 +56,17 @@ __all__ = [
 
 
 class UserFileSource(TypedDict):
-    """``{"kind": "user_upload"}``, or an Artifact revision with its IDs."""
+    """Where a file came from.
 
-    kind: Literal["user_upload", "artifact_revision"]
-    artifactId: NotRequired[str]
-    revisionId: NotRequired[str]
-    revisionNumber: NotRequired[int]
+    ``{"kind": "user_upload"}`` for an upload by the owner;
+    ``{"kind": "session", "sessionId", "operationId"}`` for a file an
+    Operation of the owner's Session produced, such as an image or a binary
+    MCP tool result.
+    """
+
+    kind: Literal["user_upload", "session"]
     sessionId: NotRequired[str]
-    turnId: NotRequired[str | None]
-    operationId: NotRequired[str | None]
+    operationId: NotRequired[str]
 
 
 class UserFile(TypedDict):

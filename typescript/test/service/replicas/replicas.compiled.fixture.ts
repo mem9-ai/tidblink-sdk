@@ -88,6 +88,7 @@ it("the installed SDK keeps Session connections across replicas, drains and reco
     child.stderr!.on("data", (bytes) => (output += bytes));
     let title: ReturnType<typeof harness.model.enqueueText> | undefined;
     let held: ReturnType<typeof harness.model.enqueueText> | undefined;
+    let connectorTitle: ReturnType<typeof harness.model.enqueueText> | undefined;
     const consumer = child;
     const toolTurn = (answer: string, output: string) => {
       harness.model.enqueueToolCalls({
@@ -95,9 +96,33 @@ it("the installed SDK keeps Session connections across replicas, drains and reco
       });
       harness.model.enqueueText({ chunks: [answer], expectRequest: { bodyIncludes: [output] } });
     };
-    child.on("message", (message: { stage: string }) => {
+    const connectorTurn = (orderId: string, answer: string) => {
+      harness.model.enqueueToolCalls({
+        toolCalls: [
+          { id: `sdk_connector_${orderId}`, name: "mcp_sdk_replicas__lookup_order", arguments: { orderId } },
+        ],
+      });
+      harness.model.enqueueText({ chunks: [answer], expectRequest: { bodyIncludes: [`Order ${orderId} shipped`] } });
+    };
+    child.on("message", (message: { stage: string; connectorId?: string }) => {
       void (async () => {
-        if (message.stage === "tool") {
+        let value: unknown;
+        if (message.stage === "connector") {
+          value = (
+            await harness.publishAgentTemplateFixture({
+              name: "SDK replicas Connector",
+              content: { tools: { mcp: [{ serverId: message.connectorId! }] } },
+            })
+          ).templateId;
+          connectorTurn("order_7", "Order found.");
+          // That Session's first Turn is followed by its background title too.
+          connectorTitle = harness.model.enqueueText({
+            chunks: ["SDK replicas Connector"],
+            expectRequest: { bodyIncludes: ["Generate exactly one concise session title."] },
+          });
+        } else if (message.stage === "connectorAgain") {
+          connectorTurn("order_8", "Order found again.");
+        } else if (message.stage === "tool") {
           toolTurn("Dimmed.", "Lamp dimmed to 40%");
           // The Session's first Turn is followed by its background title.
           title = harness.model.enqueueText({
@@ -106,6 +131,7 @@ it("the installed SDK keeps Session connections across replicas, drains and reco
           });
         } else if (message.stage === "stopB") {
           await title!.waitUntilRequested();
+          await connectorTitle?.waitUntilRequested();
           // B announces connection.drain, then stops.
           await replica.stop();
         } else if (message.stage === "toolAgain") {
@@ -117,7 +143,7 @@ it("the installed SDK keeps Session connections across replicas, drains and reco
         } else if (message.stage === "release") {
           held!.release();
         } else throw new Error(`Unknown fixture stage: ${message.stage}`);
-        consumer.send({});
+        consumer.send({ value });
       })().catch((error) => consumer.send({ error: String(harness.redactError(error)) }));
     });
     const code = await new Promise<number | null>((resolve, reject) => {

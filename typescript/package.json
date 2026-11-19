@@ -8,8 +8,8 @@
     "node": ">=22.12"
   },
   "tidbLinkApiVersion": "0.0.1",
-  "tidbLinkRevision": "c21a5e3a091c938576ee3bb36cba72baf0e87022",
-  "tidbLinkOpenApiSha256": "0b7b19720f557a0b3385b297cf59207e94d6c087100192d4f65800642dc491ba",
+  "tidbLinkRevision": "501eee1c608111c1f04ac9311b9c55ed90be8170",
+  "tidbLinkOpenApiSha256": "29f5ea39cc310ce69ece6b2351fac64bba015c07e83dd11a532be3e073feb96b",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -22,7 +22,7 @@
     "./examples/read-usage.mjs": "./examples/read-usage.mjs",
     "./examples/upload-file.mjs": "./examples/upload-file.mjs",
     "./examples/submit-audio.mjs": "./examples/submit-audio.mjs",
-    "./examples/http-connector.mjs": "./examples/http-connector.mjs",
+    "./examples/serve-connector.mjs": "./examples/serve-connector.mjs",
     "./examples/lamp-backend.mjs": "./examples/lamp-backend.mjs"
   },
   "files": [
@@ -35,7 +35,7 @@
     "examples/read-usage.mjs",
     "examples/upload-file.mjs",
     "examples/submit-audio.mjs",
-    "examples/http-connector.mjs",
+    "examples/serve-connector.mjs",
     "examples/lamp-backend.mjs"
   ],
   "scripts": {

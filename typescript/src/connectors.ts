@@ -1,85 +1,43 @@
-import { OutcomeUnknownError } from "./errors.js";
-import {
-  HttpClient,
-  requireKnownKeys,
-  requestOptions,
-  type HttpResult,
-} from "./http.js";
+import { HttpClient, requestOptions } from "./http.js";
 import type { RequestOptions } from "./organization.js";
 
-export type ConnectorTransport = "streamable_http" | "tunnel";
+/**
+ * How the platform reaches a Connector. `backend_connection` Connectors are
+ * the ones Application Servers serve with `serveConnector`; the others are
+ * older registrations, which the SDK only reads.
+ */
+export type ConnectorTransport = "backend_connection" | "streamable_http" | "tunnel";
 
-/** An Organization-owned MCP tool server that Agents can call. */
+/** An Organization-owned Connector: functions that Sessions call as `mcp_<name>__<function>`. */
 export interface Connector {
   connectorId: string;
   organizationId: string;
   displayName: string;
-  /** The HTTPS MCP endpoint of a `streamable_http` Connector. */
+  /** The HTTPS MCP endpoint of a `streamable_http` Connector; empty otherwise. */
   endpointUrl: string;
   endpointVersion: number;
   transport: ConnectorTransport;
+  /** A `backend_connection` Connector is active from its first declaration. */
   status: "inactive" | "active";
-  /** Pass this as `expectedConnectorVersion` to change the registration. */
   connectorVersion: number;
   createdAt: string;
   updatedAt: string;
-  /** What activation discovered at the endpoint. */
-  observation?: {
+  /** What activation discovered at a `streamable_http` endpoint; null otherwise. */
+  observation: {
     era: "modern" | "legacy";
     protocolVersion: string;
     endpointVersion: number;
     probedAt: string;
     expiresAt: string;
-  };
-}
-
-export interface RegisterConnectorInput extends RequestOptions {
-  /** Unique within the Organization. */
-  displayName: string;
-  /** Defaults to `streamable_http`. */
-  transport?: ConnectorTransport;
-  /** Required for `streamable_http`: an HTTPS URL without credentials. */
-  endpointUrl?: string;
-}
-
-export interface UpdateConnectorInput {
-  displayName?: string;
-  endpointUrl?: string;
-}
-
-export interface ConnectorVersionOptions extends RequestOptions {
-  /** The `connectorVersion` you read. A changed registration is refused with ConflictError. */
-  expectedConnectorVersion: number;
+  } | null;
 }
 
 const connectorPath = (id: string) => `/connectors/${encodeURIComponent(id)}`;
 
-const connectorReceipt = (result: HttpResult<Connector>): Connector => {
-  if (typeof result.data?.connectorId !== "string" || !result.data.connectorId)
-    throw new OutcomeUnknownError(
-      "Connector change returned no usable registration; read it before changing it again",
-      { requestId: result.requestId },
-    );
-  return result.data;
-};
-
-const requireVersion = (options: ConnectorVersionOptions, label: string) => {
-  requireKnownKeys(
-    options,
-    ["expectedConnectorVersion", "signal", "requestId"],
-    `${label} options`,
-  );
-  if (
-    !Number.isSafeInteger(options.expectedConnectorVersion) ||
-    options.expectedConnectorVersion < 0
-  )
-    throw new TypeError(`${label} requires expectedConnectorVersion`);
-};
-
 /**
- * Organization Connector registrations. Register a Connector, then activate
- * it: activation connects to the endpoint and discovers its tools. Edit only
- * an inactive Connector.
+ * Reads the Organization's Connectors. Serving a Connector with
+ * `organization.serveConnector()` creates it; there is no separate
+ * registration.
  */
 export class Connectors {
   readonly #http: HttpClient;
@@ -98,79 +56,5 @@ export class Connectors {
 
   get(connectorId: string, options?: RequestOptions): Promise<Connector> {
     return this.#http.get(connectorPath(connectorId), requestOptions(options));
-  }
-
-  /**
-   * Register an inactive Connector. Registration is not retried; after an
-   * OutcomeUnknownError, list the Connectors and match the display name, which
-   * is unique in the Organization.
-   */
-  async register(input: RegisterConnectorInput): Promise<Connector> {
-    requireKnownKeys(
-      input,
-      ["displayName", "transport", "endpointUrl", "signal", "requestId"],
-      "Connector registration",
-    );
-    if (typeof input.displayName !== "string" || !input.displayName.trim())
-      throw new TypeError("Connector registration requires a displayName");
-    const { signal, requestId, ...body } = input;
-    return connectorReceipt(
-      await this.#http.postResponse<Connector>("/connectors", body, {
-        outcomeUnknown: true,
-        ...(signal ? { signal } : {}),
-        ...(requestId ? { requestId } : {}),
-      }),
-    );
-  }
-
-  /** Edit an inactive Connector. */
-  async update(
-    connectorId: string,
-    input: UpdateConnectorInput,
-    options: ConnectorVersionOptions,
-  ): Promise<Connector> {
-    requireKnownKeys(input, ["displayName", "endpointUrl"], "Connector update");
-    requireVersion(options, "Connector update");
-    const { expectedConnectorVersion, ...request } = options;
-    return connectorReceipt(
-      await this.#http.patchResponse<Connector>(
-        connectorPath(connectorId),
-        { expectedConnectorVersion, ...input },
-        { outcomeUnknown: true, ...request },
-      ),
-    );
-  }
-
-  /** Discover the endpoint's tools and activate the Connector. */
-  activate(
-    connectorId: string,
-    options: ConnectorVersionOptions,
-  ): Promise<Connector> {
-    return this.#transition(connectorId, "activate", options);
-  }
-
-  /** Stop new calls to the Connector. */
-  deactivate(
-    connectorId: string,
-    options: ConnectorVersionOptions,
-  ): Promise<Connector> {
-    return this.#transition(connectorId, "deactivate", options);
-  }
-
-  async #transition(
-    connectorId: string,
-    action: "activate" | "deactivate",
-    options: ConnectorVersionOptions,
-  ): Promise<Connector> {
-    requireVersion(options, `Connector ${action}`);
-    const { expectedConnectorVersion, ...request } = options;
-    return connectorReceipt(
-      await this.#http.postResponse<Connector>(
-        `${connectorPath(connectorId)}/${action}`,
-        { expectedConnectorVersion },
-        // Not retried: a repeat after a lost response would be refused as a version conflict.
-        { outcomeUnknown: true, ...request },
-      ),
-    );
   }
 }

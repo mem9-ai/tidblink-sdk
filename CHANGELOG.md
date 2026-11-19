@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+Aligns with service
+[501eee1c](https://github.com/mem9-ai/agent-stack/commit/501eee1c608111c1f04ac9311b9c55ed90be8170),
+OpenAPI SHA-256
+`29f5ea39cc310ce69ece6b2351fac64bba015c07e83dd11a532be3e073feb96b`, where
+Connectors are served over Backend Connections (ADR 0109).
+
+### Connectors
+
+- Add `organization.serveConnector({ name, tools, onError? })`. It serves a
+  Connector's functions from this process over its Backend Connections and
+  resolves with a `ServedConnector`: `connectorId` (reference it from a
+  Template's `tools.mcp[].serverId`), `closed` and `close()`. Serving a name
+  creates the Organization's Connector with that name; there is no separate
+  registration or activation. `tools` is written like `session.connect({ tools
+  })`, and a handler's context also carries `connector: { id, name }`. The
+  model sees each function as `mcp_<name>__<function>`. Calls are claimed on
+  the connection that delivered them, run at most once per `callId`, abort at
+  their deadline, and can come from any Session of the Organization. The client
+  declares a served Connector on every Backend Connection, declares it again
+  after a reconnect or `connection.drain`, and keeps one connection open while
+  any Connector is served. Names and function declarations are checked locally
+  and throw a `TypeError` before anything is sent.
+- **Breaking:** remove HTTP callback Connectors: `verifyConnectorCallback`,
+  `readConnectorCallContext`, `ConnectorKeySet`, `ConnectorAuthError`,
+  `CONNECTOR_CALLBACK_ISSUER`, `CONNECTOR_CALLBACK_AUDIENCE`,
+  `CONNECTOR_CALL_CONTEXT_KEY` and their types, and the `http-connector.mjs`
+  example, replaced by `serve-connector.mjs`.
+- **Breaking:** `organization.connectors` only reads: `register`, `update`,
+  `activate` and `deactivate` are removed, with `RegisterConnectorInput`,
+  `UpdateConnectorInput` and `ConnectorVersionOptions`. `Connector.transport`
+  adds `backend_connection`, and `observation` is always present, null for
+  Connectors that are not `streamable_http`.
+
+### Service alignment
+
+- A request refused with `authentication_required` now closes its Backend
+  Connection with 4001 at once. The request fails with that refusal and every
+  Session connection and served Connector of the connection ends with reason
+  `error`; nothing reconnects with the invalid Key.
+- `UserFile.source` is `{ kind: "user_upload" }` or, for a file a Session
+  produced, `{ kind: "session", sessionId, operationId }`; the
+  `artifact_revision` form, which the service no longer returns, is removed.
+- `TurnFailure.details.registrations` lists the MCP Server Registrations whose
+  authorization is missing when a Turn fails with `mcp_authorization_required`.
+  A message refused for that reason is not saved.
+- Template content's `tools.mcp[]` entries accept `toolNames`, which limits the
+  tools an MCP Server Registration exposes.
+
 ## 0.4.0
 
 Stable release on the `latest` dist-tag for service

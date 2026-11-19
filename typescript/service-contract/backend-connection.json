@@ -1,10 +1,10 @@
 {
-  "revision": "c21a5e3a091c938576ee3bb36cba72baf0e87022",
-  "sourceSchemaSha256": "2254dbcb243a9efd120d18d0efc8ac418b6635cdd955e42a7b1c8645826e09d5",
+  "revision": "501eee1c608111c1f04ac9311b9c55ed90be8170",
+  "sourceSchemaSha256": "744d5fe2e5535228e5453234d3bea85fa6ef0c80d6d0a07d957f074ef4730938",
   "schema": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "tidb-link.backend.v1",
-    "description": "Backend Connection messages (ADR 0109). Open a WebSocket to /api/v1/org/backend/ws with the tidb-link.backend.v1 subprotocol and an Organization API Key in the Authorization header. Each text frame carries one JSON-RPC 2.0 message; binary frames and batches are not used. The core sends hello first, and the Application Server sends nothing before it. The Application Server sends the requests session.attach, session.detach, session.send, tool.claim, tool.result and ping (SessionAttachRequest, SessionDetachRequest, SessionSendRequest, ToolClaimRequest, ToolResultRequest, PingRequest); the core sends the notifications and responses in CoreMessage, including session.event and tool.call.",
+    "description": "Backend Connection messages (ADR 0109). Open a WebSocket to /api/v1/org/backend/ws with the tidb-link.backend.v1 subprotocol and an Organization API Key in the Authorization header. Each text frame carries one JSON-RPC 2.0 message; binary frames and batches are not used. The core sends hello first, and the Application Server sends nothing before it. The Application Server sends the requests session.attach, session.detach, session.send, connector.serve, connector.withdraw, tool.claim, tool.result and ping (SessionAttachRequest, SessionDetachRequest, SessionSendRequest, ConnectorServeRequest, ConnectorWithdrawRequest, ToolClaimRequest, ToolResultRequest, PingRequest); the core sends the notifications and responses in CoreMessage, including session.event and tool.call.",
     "x-subprotocol": "tidb-link.backend.v1",
     "x-path": "/api/v1/org/backend/ws",
     "x-close-codes": {
@@ -22,9 +22,9 @@
       "-32700": "Parse error: the frame is not JSON. The response id is null.",
       "-32600": "Invalid Request: not a single JSON-RPC 2.0 request, notification or response object, or a string id longer than 256 characters (answered with id null).",
       "-32601": "Method not found.",
-      "-32602": "Invalid params: the params do not match the method's definition, including unknown members and invalid Client Tool declarations.",
+      "-32602": "Invalid params: the params do not match the method's definition, including unknown members, invalid Client Tool declarations and Connector or function names that do not equal their own slug.",
       "-32603": "Internal error: the core could not complete the request, the connection is closing, or this connection has more than twice maxSessions requests unanswered; retry, on a new connection if this one closes.",
-      "-32000": "Refused: error.data.reason is connection_full (this connection already holds or is acquiring maxSessions attachments; open another connection), connection_draining (the core sent connection.drain; attach or send on a new connection), session_not_found (no active Session of that ordinary End User in the Key's Organization), session_read_only (the Session cannot be continued, so its tools cannot be replaced) or authentication_required (the Key or its Organization is no longer valid; the connection closes with 4001). tool.result answers it too; other tool.claim and tool.result refusals are results, not errors. session.send also answers session_not_attached (this connection holds no attachment of the Session) and every refusal of the REST message command, with the ErrorEnvelope's code as reason, its message as error.message and its details as error.data.details."
+      "-32000": "Refused: error.data.reason is connection_full (this connection already holds or is acquiring maxSessions attachments; open another connection), connection_draining (the core sent connection.drain; attach, send or serve on a new connection), session_not_found (no active Session of that ordinary End User in the Key's Organization), session_read_only (the Session cannot be continued, so its tools cannot be replaced) or authentication_required (the Key or its Organization is no longer valid; whichever request answers it, including session.attach, session.send, connector.serve and tool.result, the connection closes with 4001, which ends its declarations and attachments). tool.result answers it too; other tool.claim and tool.result refusals are results, not errors. session.send also answers session_not_attached (this connection holds no attachment of the Session) and every refusal of the REST message command, with the ErrorEnvelope's code as reason, its message as error.message and its details as error.data.details. A message that would start a Turn whose MCP Authorization is not usable is refused with mcp_authorization_required, and nothing is saved."
     },
     "definitions": {
       "CoreMessage": {
@@ -50,6 +50,9 @@
           },
           {
             "$ref": "#/definitions/SessionDetachResponse"
+          },
+          {
+            "$ref": "#/definitions/ConnectorServeResponse"
           },
           {
             "$ref": "#/definitions/ToolClaimResponse"
@@ -295,7 +298,7 @@
         }
       },
       "ToolClaimRequest": {
-        "description": "Ask to execute one tool.call. Only the connection holding the Session's current executing attachment is granted a call, while the call awaits its outcome and its claim window is open; the claim binds the call to that attachment's generation. Repeating the claim from the same connection and generation answers claimed: true again. Execute only after claimed: true. If the answer is lost, do not execute; submit an error result instead, since the claim may have been granted.",
+        "description": "Ask to execute one tool.call. A Client Tool call is granted only to the connection holding the Session's current executing attachment, while the call awaits its outcome and its claim window is open; the claim binds the call to that attachment's generation, and repeating it from the same connection and generation answers claimed: true again. A Connector call is granted only to the connection it was sent to, while that connection is open and the claim window open; the claim binds the call to that connection, and repeating it there answers claimed: true again. Execute only after claimed: true. If the answer is lost, do not execute; submit an error result instead, since the claim may have been granted.",
         "type": "object",
         "required": [
           "jsonrpc",
@@ -336,7 +339,7 @@
         }
       },
       "ToolResultRequest": {
-        "description": "Submit a claimed call's result: output, or error when execution failed. Any Backend Connection of the call's Organization may submit it, so a result survives a connection change. The first valid result settles the call; submitting the same result again answers accepted: true, a different one is refused. Its accepted result appears in the Session's interaction list under the input ID tool.result#<callId>, which no REST clientEventId can take or look up. A Key or Organization that is no longer valid is refused with error -32000, reason authentication_required, and the connection closes with 4001; submit the result again through a connection of a valid Key. Lengths count UTF-16 code units; JSON Schema maxLength counts code points.",
+        "description": "Submit a claimed call's result: output, or error when execution failed. Any Backend Connection of the call's Organization may submit it, so a result survives a connection change. The first valid result settles the call; submitting the same result again answers accepted: true, a different one is refused. An accepted Client Tool result appears in the Session's interaction list under the input ID tool.result#<callId>, which no REST clientEventId can take or look up; a Connector call's result is recorded with the call only. For a Connector call, output or the error message is what the model receives; an error tells it the function reported an error. A Key or Organization that is no longer valid is refused with error -32000, reason authentication_required, and the connection closes with 4001; submit the result again through a connection of a valid Key. Lengths count UTF-16 code units; JSON Schema maxLength counts code points.",
         "type": "object",
         "required": [
           "jsonrpc",
@@ -568,6 +571,97 @@
           }
         }
       },
+      "ConnectorServeRequest": {
+        "description": "Declare the functions of the Organization's Connector that this connection serves (ADR 0109). The core finds the Organization's Connector with this name, or creates it, and answers its connectorId: an Organization has one Connector name space, so the same name is the same Connector. Serving the same name again on this connection replaces this connection's declaration. A connection serves the Connector while it holds a declaration and stays open; connector.withdraw or the end of the connection ends its declaration. The Connector also stores the latest declaration served. A Run whose Template references the Connector freezes the declaration most recently served among the connections serving it, or the stored one when none serves it, and the model sees each function as mcp_<name>__<function name>, with the platform-reserved async choice. Creating the Connector or changing its stored declaration is audited with this connection's Key; serving an unchanged declaration is not. A call of a served function arrives as tool.call with connector on one connection serving the Connector whose declaration of the function matches the frozen one; with none, the call is not performed and the Turn continues. A streamable_http or tunnel Connector with this name is taken over in place: it keeps its connectorId, becomes a backend_connection Connector without endpoint or observation, and Runs that froze it under its old transport can no longer call it. Refused with connection_draining after connection.drain, and with authentication_required when the Key or its Organization is no longer valid; the connection then closes with 4001, which ends its declarations and attachments.",
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "id",
+          "method",
+          "params"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "jsonrpc": {
+            "const": "2.0"
+          },
+          "id": {
+            "type": [
+              "string",
+              "number",
+              "null"
+            ],
+            "maxLength": 256
+          },
+          "method": {
+            "const": "connector.serve"
+          },
+          "params": {
+            "type": "object",
+            "required": [
+              "name",
+              "tools"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "description": "The Connector name, equal to its own slug: lowercase letters and digits joined by single underscores.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 29,
+                "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+              },
+              "tools": {
+                "description": "The functions this connection serves, replacing its earlier declaration of the Connector.",
+                "$ref": "#/definitions/ConnectorFunctionDeclarations"
+              }
+            }
+          }
+        }
+      },
+      "ConnectorWithdrawRequest": {
+        "description": "End this connection's declaration of the Connector. Answers an empty result, like SessionDetachResponse, even when the connection holds none. The Connector and its stored latest declaration stay.",
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "id",
+          "method",
+          "params"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "jsonrpc": {
+            "const": "2.0"
+          },
+          "id": {
+            "type": [
+              "string",
+              "number",
+              "null"
+            ],
+            "maxLength": 256
+          },
+          "method": {
+            "const": "connector.withdraw"
+          },
+          "params": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "description": "The Connector name.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 29,
+                "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+              }
+            }
+          }
+        }
+      },
       "PingRequest": {
         "description": "Liveness probe for an Application Server whose WebSocket cannot send or observe ping frames. The core answers at once without database work, never behind other requests, and the request never counts toward the unanswered-request limit. The core's ping frames still need their pongs, which WebSocket clients send automatically.",
         "type": "object",
@@ -634,6 +728,46 @@
           ],
           "additionalProperties": false
         }
+      },
+      "ConnectorFunctionDeclarations": {
+        "type": "array",
+        "maxItems": 64,
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "function"
+              ]
+            },
+            "name": {
+              "description": "Function name, equal to its own slug: lowercase letters and digits joined by single underscores. tool.call carries it as name.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 29,
+              "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "parameters": {
+              "type": "object",
+              "additionalProperties": {},
+              "description": "A JSON Schema with type \"object\" that neither defines nor requires the platform-reserved async property."
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "description",
+            "parameters"
+          ],
+          "additionalProperties": false
+        },
+        "description": "Connector functions, shaped like Client Tool declarations: names are unique within the declaration."
       },
       "Hello": {
         "description": "First message on every connection. Parameters may change without a new subprotocol version.",
@@ -793,7 +927,7 @@
                 "type": "string"
               },
               "event": {
-                "description": "The Session event envelope: type (agent.session.turn.*, agent.session.realtime.*, agent.session.template_switch.*, agent.session.idle), sessionId, turnId, createdAt and data. agent.session.idle follows the terminal events of a Turn once the Session has released it; wait for it before session.send, an audio Turn or a Template switch.",
+                "description": "The Session event envelope: type (agent.session.turn.*, agent.session.realtime.*, agent.session.template_switch.*, agent.session.idle), sessionId, turnId, createdAt and data. agent.session.idle follows the terminal events of a Turn once the Session has released it; wait for it before session.send, an audio Turn or a Template switch. A failed Turn sends agent.session.turn.failed twice: data.event turn_error with the Turn's failure in data.payload (code, message and, for some codes, details; the same payload a Turn read returns as failure), then data.event turn_finished. With code mcp_authorization_required, an MCP Authorization stopped being usable during the Turn (revoked, or refused by the server with HTTP 401 or 403) and details.registrations lists {serverId, owner, reason} as in the session.send refusal; the Turn is not resumed, so send a new message once the authorization is usable again.",
                 "type": "object",
                 "required": [
                   "type",
@@ -828,7 +962,7 @@
         }
       },
       "ToolCall": {
-        "description": "One Client Tool call published to the Session's executing attachment (ADR 0109). Execute it only after tool.claim answers claimed: true; the requires_action Session event that records the same calls authorizes nothing. The core sends a call to the attachment that was executing when the call was published, and to a later executing attachment of the Session (after a reconnect or a move to another connection) while the call is still unclaimed and its claim window open; a call whose claim window has just passed, or that an earlier attachment generation claimed, may still arrive, and its claim is refused; it sends each call at most once per attachment, so deduplicate by callId. An attachment superseded moments earlier may still receive a call; its claim is refused. A call published while the Session had no executing attachment is not delivered, at once, and is never sent here. If its Turn ends first, an unclaimed call is reported not performed and a claimed one without a result unknown.",
+        "description": "One published call to execute: a Client Tool call published to the Session's executing attachment, or a Connector call published to the Serving Connection chosen for it (ADR 0109). Execute it only after tool.claim answers claimed: true; the requires_action Session event that records Client Tool calls authorizes nothing, and Connector calls have no Session event. The core sends a Client Tool call to the attachment that was executing when the call was published, and to a later executing attachment of the Session (after a reconnect or a move to another connection) while the call is still unclaimed and its claim window open; a call whose claim window has just passed, or that an earlier attachment generation claimed, may still arrive, and its claim is refused; it sends each call at most once per attachment, so deduplicate by callId. An attachment superseded moments earlier may still receive a call; its claim is refused. A call published while the Session had no executing attachment is not delivered, at once, and is never sent here. A Connector call carries connector and goes to exactly one connection serving the Connector whose declaration of the function matches the one the Run froze, preferring the connection holding the Session's executing attachment, then one on the replica running the Turn; it needs no attachment and is sent once, never offered to another connection. With no such connection it is not delivered, at once. If its Turn ends first, an unclaimed call is reported not performed and a claimed one without a result unknown.",
         "type": "object",
         "required": [
           "jsonrpc",
@@ -864,15 +998,34 @@
                 "type": "string"
               },
               "userId": {
-                "description": "The Session's End User owner.",
+                "description": "The Session's End User owner, also on a Connector call.",
                 "type": "string"
               },
               "turnId": {
                 "type": "string"
               },
               "name": {
-                "description": "A Client Tool the Session declared.",
+                "description": "A Client Tool the Session declared, or the declared name of a Connector function.",
                 "type": "string"
+              },
+              "connector": {
+                "description": "Present on a Connector call only: the Connector whose function to run, as this connection served it with connector.serve.",
+                "type": "object",
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "description": "The connectorId connector.serve answered.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "The Connector name.",
+                    "type": "string"
+                  }
+                }
               },
               "arguments": {
                 "description": "The model's arguments, without the reserved async choice.",
@@ -932,7 +1085,7 @@
         }
       },
       "SessionDetachResponse": {
-        "description": "Result of session.detach.",
+        "description": "Result of session.detach and connector.withdraw.",
         "type": "object",
         "required": [
           "jsonrpc",
@@ -955,6 +1108,41 @@
             "type": "object",
             "additionalProperties": false,
             "maxProperties": 0
+          }
+        }
+      },
+      "ConnectorServeResponse": {
+        "description": "Result of connector.serve.",
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "id",
+          "result"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "jsonrpc": {
+            "const": "2.0"
+          },
+          "id": {
+            "type": [
+              "string",
+              "number",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "required": [
+              "connectorId"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "connectorId": {
+                "description": "The Organization's Connector with the served name; Templates reference it as tools.mcp[].serverId.",
+                "type": "string"
+              }
+            }
           }
         }
       },
@@ -1004,7 +1192,7 @@
                     "const": false
                   },
                   "reason": {
-                    "description": "call_not_found: no such call in the Key's Organization, or one published without an executing attachment before the per-Session subscription was removed. superseded: this connection does not hold the Session's current executing attachment, or another attachment generation claimed the call. claim_window_closed: claimBy passed without a claim; the call was not performed. call_settled: the core already decided the call's outcome, including a call published while its Session had no executing attachment, which is not delivered at once.",
+                    "description": "call_not_found: no such call in the Key's Organization, one published without an executing attachment before the per-Session subscription was removed, or a Connector call sent to another connection. superseded: this connection does not hold the Session's current executing attachment, another attachment generation claimed the call, or this connection's lease has ended. claim_window_closed: claimBy passed without a claim; the call was not performed. call_settled: the core already decided the call's outcome, including a call published while its Session had no executing attachment, or with no connection serving the function, which is not delivered at once.",
                     "type": "string",
                     "enum": [
                       "call_not_found",
@@ -1065,7 +1253,7 @@
                     "const": false
                   },
                   "reason": {
-                    "description": "call_not_found: no such call in the Key's Organization or visible to the Key, or one published without an executing attachment before the per-Session subscription was removed. not_claimed: no attachment claimed the call. call_settled: the call already has an outcome, from an earlier different result, its deadline, the end of its Turn or its publication while its Session had no executing attachment.",
+                    "description": "call_not_found: no such call in the Key's Organization or visible to the Key, or one published without an executing attachment before the per-Session subscription was removed. not_claimed: no connection claimed the call. call_settled: the call already has an outcome, from an earlier different result, its deadline, the end of its Turn or its publication while nobody could claim it.",
                     "type": "string",
                     "enum": [
                       "call_not_found",
@@ -1341,7 +1529,7 @@
                     "type": "string"
                   },
                   "details": {
-                    "description": "session.send only: the REST ErrorEnvelope details, when present."
+                    "description": "session.send only: the REST ErrorEnvelope details, when present. With reason mcp_authorization_required, details.registrations lists each MCP Server Registration whose MCP Authorization is not usable, as {serverId, owner: organization or end_user, reason: missing, invalid, revoked or insufficient_scope}."
                   }
                 }
               }
