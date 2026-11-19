@@ -33,16 +33,9 @@ after(async () => {
 
 const record = {
   connectorId,
-  organizationId: "org_1",
   displayName: "orders",
-  endpointUrl: "",
-  endpointVersion: 1,
-  transport: "backend_connection",
-  status: "active",
-  connectorVersion: 1,
   createdAt: "2026-11-19T00:00:00.000Z",
   updatedAt: "2026-11-19T00:00:00.000Z",
-  observation: null,
 };
 
 /**
@@ -135,7 +128,7 @@ test("Connectors are read, and registration, callbacks and verification are gone
   clients.push(organization);
   const { connectors } = organization;
   assert.deepEqual(await connectors.list(), [record]);
-  assert.equal((await connectors.get(connectorId)).transport, "backend_connection");
+  assert.deepEqual(await connectors.get(connectorId), record);
   assert.deepEqual(calls, ["GET /connectors", `GET /connectors/${connectorId}`]);
   for (const method of ["register", "update", "activate", "deactivate"])
     assert.equal(connectors[method], undefined, method);

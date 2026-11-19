@@ -31,14 +31,13 @@ test("the SDK freezes only the Connector reads, under Organization authority", (
   assert(!JSON.stringify(contract).includes("/api/v1/connectors/jwks"));
 });
 
-test("a Connector record names its transport, including Connectors served over Backend Connections", () => {
+test("a Connector record is the declared Connector only, without transport or registration fields", () => {
   const record = success(contract.paths[`${connectors}/{connectorId}`].get, "200");
-  for (const field of ["connectorId", "transport", "status", "endpointUrl", "observation"])
-    assert(record.required.includes(field), field);
-  assert.deepEqual(record.properties.transport.enum, ["streamable_http", "tunnel", "backend_connection"]);
-  assert.match(record.properties.transport.description, /connector\.serve/);
-  assert.deepEqual(record.properties.status.enum, ["inactive", "active"]);
-  assert.equal(record.properties.observation.nullable, true);
+  assert.deepEqual(record.required, ["connectorId", "displayName", "createdAt", "updatedAt"]);
+  assert.deepEqual(Object.keys(record.properties).sort(), ["connectorId", "createdAt", "displayName", "updatedAt"]);
+  assert.equal(record.additionalProperties, false);
+  assert.match(record.description, /connector\.serve/);
   const page = success(contract.paths[connectors].get, "200");
   assert.deepEqual(page.required, ["connectors"]);
+  assert.match(contract.paths[connectors].get.description, /whether or not a connection serves it now/);
 });

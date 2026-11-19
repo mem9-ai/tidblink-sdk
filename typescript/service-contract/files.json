@@ -1,6 +1,6 @@
 {
-  "revision": "501eee1c608111c1f04ac9311b9c55ed90be8170",
-  "sourceOpenApiSha256": "29f5ea39cc310ce69ece6b2351fac64bba015c07e83dd11a532be3e073feb96b",
+  "revision": "07d1f9c85c0fedd729c76c4cb4a48485d139c8ff",
+  "sourceOpenApiSha256": "74215cefcabb18e915fa6a13d4a4dbcbd3720aa1eb5b522e0fd3e83d2b6ad131",
   "paths": {
     "/api/v1/org/users/{userId}/files": {
       "get": {
@@ -1740,6 +1740,9 @@
                   "mcp_authorization_required",
                   "mcp_oauth_unavailable",
                   "mcp_oauth_confirmation_invalid",
+                  "mcp_authorization_mode_mismatch",
+                  "mcp_credential_rejected",
+                  "mcp_catalog_discovery_failed",
                   "model_provider_unconfigured",
                   "sandbox_unconfigured",
                   "sandbox_validation_pending",
@@ -1810,6 +1813,8 @@
                   "skill_name_conflict",
                   "skill_delete_blocked",
                   "mcp_server_delete_blocked",
+                  "mcp_server_name_conflict",
+                  "mcp_server_version_conflict",
                   "invalid_skill_package",
                   "skill_ingestion_not_found",
                   "skill_import_job_not_found",

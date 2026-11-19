@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Align with service
+  [07d1f9c8](https://github.com/mem9-ai/agent-stack/commit/07d1f9c85c0fedd729c76c4cb4a48485d139c8ff),
+  OpenAPI SHA-256
+  `74215cefcabb18e915fa6a13d4a4dbcbd3720aa1eb5b522e0fd3e83d2b6ad131`, which
+  removes the HTTP callback and tunnel Connector transports and their
+  management routes.
+- **Breaking:** a `Connector` record is `{ connectorId, displayName, createdAt,
+  updatedAt }`: `organizationId`, `endpointUrl`, `endpointVersion`,
+  `transport`, `status`, `connectorVersion` and `observation` are removed, and
+  so is the `ConnectorTransport` type. `connectors.list()` and `get()` return
+  only Connectors declared with `serveConnector`; one left from the retired
+  transports appears again once a process serves its name, with the same
+  `connectorId`.
+- `TurnFailure.details.registrations[].reason` adds `catalog_unavailable`: the
+  MCP Server Registration's authorization is usable but its tool catalog has
+  not been discovered.
+- The README describes the lamp example as it is since 0.4.0: `templates`,
+  `bindDevice(appUserId, deviceId, model)` and `changeModel`.
+
 ## 0.5.0-rc.0
 
 Prerelease on the `next` dist-tag. Aligns with service
