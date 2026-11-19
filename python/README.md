@@ -170,6 +170,12 @@ await conn.close()
 end = await conn.closed  # SessionConnectionEnd(reason="closed")
 ```
 
+`conn.send()` raises the same errors as `session.turn()`. Once the message is
+sent, its `timeout` never raises a plain `TimeoutError`, since the core may
+already have the message: it raises `TurnWaitTimeoutError` with `input_id`;
+recover with `session.wait_for_result(input_id)` or send again with the same
+`client_event_id`.
+
 A Client Tool call made while no connection executes the Session is reported to
 the model as not performed at once: no `run` handler sees it, and no
 `requires_action` event or audio `client_tool_calls` frame records it. Calls

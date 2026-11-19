@@ -35,6 +35,16 @@ Connectors are served over Backend Connections (ADR 0109).
   adds `backend_connection`, and `observation` is always present, null for
   Connectors that are not `streamable_http`.
 
+### Session connections
+
+- **Breaking:** `conn.send()` stopped by its `timeoutMs` or `signal` while the
+  core had not yet answered the message now raises `TurnWaitTimeoutError` or
+  `OutcomeUnknownError` with `sessionId` and `inputId`, like `session.turn()`,
+  instead of the signal's `TimeoutError` or `AbortError`: the core may already
+  have accepted the message. Recover it with `session.waitForResult(inputId)`
+  or send again with the same `clientEventId`. The Python SDK's `conn.send()`
+  raises `TurnWaitTimeoutError` instead of `TimeoutError` in the same case.
+
 ### Service alignment
 
 - A request refused with `authentication_required` now closes its Backend

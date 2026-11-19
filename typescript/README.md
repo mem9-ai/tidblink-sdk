@@ -673,6 +673,12 @@ return reply.text;
   sends the message again with the same `clientEventId`, which the core
   deduplicates; if it cannot, the call raises `OutcomeUnknownError` with
   `inputId`, and `session.waitForResult(inputId)` recovers the result.
+- Once the message is sent, stopping the call never raises a plain timeout or
+  abort, since the core may already have it: the deadline raises
+  `TurnWaitTimeoutError` and `signal` raises `OutcomeUnknownError`, both with
+  `inputId`. Recover with `session.waitForResult(inputId)`, or send again with
+  the same `clientEventId`. Only a call stopped before sending raises the
+  signal's own reason.
 - A refusal of the message command, such as `session_read_only` or
   `turn_admission_closed`, raises `BackendRequestError` with that code as
   `reason` and the REST `details`.

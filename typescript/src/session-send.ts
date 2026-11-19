@@ -177,6 +177,11 @@ export async function sendOverConnection(
           }),
         ]);
       } catch (error) {
+        // Stopped while the message was out without an answer: the core may have accepted it.
+        if (stop.aborted && error === stop.reason) {
+          ambiguous = true;
+          throw error;
+        }
         if (isAmbiguous(error)) {
           // The core may have accepted it; the same clientEventId replays the receipt.
           ambiguous = true;
