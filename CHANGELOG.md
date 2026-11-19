@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.5.0
+
+Stable release on the `latest` dist-tag for service
+[201c30fb](https://github.com/mem9-ai/agent-stack/commit/201c30fb737c29db929880b2f1f06e54fd247a44),
+OpenAPI SHA-256
+`74215cefcabb18e915fa6a13d4a4dbcbd3720aa1eb5b522e0fd3e83d2b6ad131`, which is
+deployed to production. It contains every change in 0.5.0-rc.0 and
+0.5.0-rc.1 below; compared with 0.4.0, Connectors are served from the
+application backend with `organization.serveConnector()` over Backend
+Connections, HTTP callback Connectors and Connector registration are removed,
+a `Connector` record only names the declared Connector, and `conn.send()`
+reports an unanswered message stopped by its deadline or signal as an unknown
+outcome. Since 0.5.0-rc.1:
+
+- Pin service `201c30fb`, the production deployment, instead of `07d1f9c8`,
+  which only adds documentation; the OpenAPI and Backend Connection contracts
+  are identical.
+
 ## 0.5.0-rc.1
 
 Prerelease on the `next` dist-tag.
