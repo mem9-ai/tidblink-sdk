@@ -33,16 +33,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CONNECTOR_ID = "conn_00000000-0000-0000-0000-000000000001"
 record = {
     "connectorId": CONNECTOR_ID,
-    "organizationId": "org_1",
     "displayName": "orders",
-    "endpointUrl": "",
-    "endpointVersion": 1,
-    "transport": "backend_connection",
-    "status": "active",
-    "connectorVersion": 1,
     "createdAt": "2026-11-19T00:00:00.000Z",
     "updatedAt": "2026-11-19T00:00:00.000Z",
-    "observation": None,
 }
 
 #: How the stand-in core answers by default: it serves Connectors, claims calls and accepts results.
@@ -117,7 +110,7 @@ async def test_connectors_are_read_and_registration_and_callbacks_are_gone() -> 
     organization, service = serve(handler)
     async with organization:
         assert await organization.connectors.list(request_id="list-1") == [record]
-        assert (await organization.connectors.get(CONNECTOR_ID))["transport"] == "backend_connection"
+        assert await organization.connectors.get(CONNECTOR_ID) == record
         for method in ("register", "update", "activate", "deactivate"):
             assert not hasattr(organization.connectors, method), method
     assert [(c.method, c.pathname) for c in service.calls] == [

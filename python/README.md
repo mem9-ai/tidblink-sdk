@@ -10,7 +10,7 @@ not ship it to browsers or devices.
 
 It follows the [TypeScript SDK](../typescript/README.md): the same supported
 scope, behaviour, errors and recovery rules, for the same exact service
-revision ([501eee1c](https://github.com/mem9-ai/agent-stack/commit/501eee1c608111c1f04ac9311b9c55ed90be8170)).
+revision ([07d1f9c8](https://github.com/mem9-ai/agent-stack/commit/07d1f9c85c0fedd729c76c4cb4a48485d139c8ff)).
 The TypeScript README is the reference for what each capability does and how to
 recover from an uncertain outcome; this README covers how that surface looks in
 Python.
@@ -263,8 +263,12 @@ end = await orders.closed  # ServedConnectorEnd(reason="closed")
   the Organization's Connector with that name; later ones, from any process or
   Key of the Organization, serve the same Connector and answer the same
   `connector_id`. The latest declaration served is what new Turns use.
-  `organization.connectors.list()` and `get(connector_id)` read Connectors;
-  there is nothing to activate or edit.
+  `organization.connectors.list()` and `get(connector_id)` read the Connectors
+  declared this way, whether or not a process serves them now, as
+  `{connectorId, displayName, createdAt, updatedAt}`; there is nothing to
+  activate or edit. A Connector left from the retired HTTP callback or tunnel
+  transports is not listed until a process serves its name, which takes it over
+  with the same `connectorId`, so Templates referencing it need no change.
 - **Names.** The Connector name and each function name are lowercase letters
   and digits joined by single underscores, 1 to 29 characters. The model sees
   each function as `mcp_<name>__<function>`, for example `mcp_orders__get_order`.

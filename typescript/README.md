@@ -13,7 +13,7 @@ text submission, steering, cancellation, checkpoint retry, original-result waiti
 continuous progress, Client Tools, Session connections over Backend Connections,
 conversation history, file attachments,
 Realtime Model/Connection preparation, prerecorded audio and User usage reads for [service revision
-501eee1c](https://github.com/mem9-ai/agent-stack/commit/501eee1c608111c1f04ac9311b9c55ed90be8170).
+07d1f9c8](https://github.com/mem9-ai/agent-stack/commit/07d1f9c85c0fedd729c76c4cb4a48485d139c8ff).
 
 Text commands return durable receipts independently of execution. Waiting reads the
 original command's outcome. The service has no Agent: a Session is created
@@ -215,8 +215,12 @@ await orders.close(); // stop serving, for example on shutdown
   the Organization's Connector with that name; later ones, from any process or
   Key of the Organization, serve the same Connector and answer the same
   `connectorId`. The latest declaration served is what new Turns use.
-  `organization.connectors.list()` and `get()` read Connectors; there is nothing
-  to activate or edit.
+  `organization.connectors.list()` and `get()` read the Connectors declared this
+  way, whether or not a process serves them now, as `{ connectorId,
+  displayName, createdAt, updatedAt }`; there is nothing to activate or edit.
+  A Connector left from the retired HTTP callback or tunnel transports is not
+  listed until a process serves its name, which takes it over with the same
+  `connectorId`, so Templates referencing it need no change.
 - **Names.** The Connector name and each function name are lowercase letters
   and digits joined by single underscores, 1 to 29 characters. The model sees
   each function as `mcp_<name>__<function>`, for example `mcp_orders__get_order`.
@@ -420,7 +424,7 @@ The Handoff Turn summarizes the Session so far for the target Template. History
 reads return it as a Turn with `kind: "template_handoff"`, no `userMessage` and
 an empty `userMessages`; when it succeeds, its assistant Message is the summary.
 The service's
-[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/501eee1c608111c1f04ac9311b9c55ed90be8170/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
+[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/07d1f9c85c0fedd729c76c4cb4a48485d139c8ff/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
 describes what the Session keeps across a switch (models, Billing Tag, Client
 Tools and creation options) and that cancelling the Handoff Turn fails the
 switch.
@@ -694,10 +698,16 @@ lived; ask for a new grant each time the device wants to talk.
 
 The packaged `lamp-backend.mjs` example is the backend of a lamp that users talk
 to by typing in an app or by speaking to the lamp, with one Session per lamp so
-both share a conversation. `createLampBackend({ baseUrl, organizationApiKey,
-templateId, device, store })` returns:
+both share a conversation. Each lamp model has its own Template.
+`createLampBackend({ baseUrl, organizationApiKey, templates, device, store })`,
+where `templates` maps each lamp model to its Template ID (for example
+`{ standard, pro }`), returns:
 
-- `bindDevice(appUserId, deviceId)`: one End User per app user, one Session per lamp.
+- `bindDevice(appUserId, deviceId, model)`: one End User per app user, one
+  Session per lamp, created from the Template of the lamp's model.
+- `changeModel(deviceId, model, { changeId? })`: switches the lamp's Session to
+  another model's Template with `session.switchTemplate()`, keeping its
+  history; pass the same `changeId` to recover a lost response.
 - `onDeviceOnline(deviceId)` / `onDeviceOffline(deviceId)`: keep the lamp's Session
   connected while it is online, with the lamp's tools `set_light`, `get_status`
   and `set_timer`, which forward each call to the lamp over your device channel.
@@ -714,7 +724,10 @@ payload)`. Wired to MQTT, with the lamp announcing itself through a retained
 presence message:
 
 ```js
-const lamps = createLampBackend({ baseUrl, organizationApiKey, templateId, device: mqttDevices(broker) });
+const lamps = createLampBackend({
+  baseUrl, organizationApiKey, templates: { standard: STANDARD_TEMPLATE_ID, pro: PRO_TEMPLATE_ID },
+  device: mqttDevices(broker),
+});
 broker.subscribe("lamp/+/presence");
 broker.subscribe("lamp/+/talk");
 broker.on("message", (topic, payload) => {
@@ -1188,7 +1201,7 @@ packed artifact in a clean ESM TypeScript consumer. To verify the packed SDK and
 its examples against the real service, use the service's Node.js 26 runtime, install its
 pinned dependencies, generate Prisma, build its Hardware contract and prepare its
 current schema in a **dedicated test database**. See the selected service's
-[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/501eee1c608111c1f04ac9311b9c55ed90be8170/docs/prisma-first-tidb-validation-and-rollout.md).
+[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/07d1f9c85c0fedd729c76c4cb4a48485d139c8ff/docs/prisma-first-tidb-validation-and-rollout.md).
 
 ```sh
 AGENT_SERVICE_ROOT=/path/to/agent-stack \
@@ -1253,7 +1266,7 @@ They cover recorded input, malformed/unsupported recordings, supplier refusals,
 model failure, active-response interruption and the installed audio example.
 The public Session projection exposes the frozen Template digest but hides the
 stored creation options. Those snapshots and active-Turn model freezing also rely
-on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/501eee1c608111c1f04ac9311b9c55ed90be8170/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
+on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/07d1f9c85c0fedd729c76c4cb4a48485d139c8ff/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
 prove those hidden values.
 Usage cases seed controlled facts and verify both public projections, exact filters,
 paging and authority without executing messages to manufacture billing data.

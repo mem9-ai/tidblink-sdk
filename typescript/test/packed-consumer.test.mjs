@@ -114,7 +114,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       ConnectOptions, ClientToolHandlers, SendOptions, SessionConnectionEnd, SessionConnection,
       Template, TemplateContent, TemplateCatalog, TemplatePage, SkillUpload, SkillDetail,
       KnownSessionEvent,
-      Connector, ConnectorTransport, ServeConnectorOptions, ServedConnector, ServedConnectorEnd,
+      Connector, ServeConnectorOptions, ServedConnector, ServedConnectorEnd,
     } from "@tidblink/server";
     import {
       TIDB_LINK_API_VERSION,
@@ -131,6 +131,8 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
     } from "@tidblink/server";
     // @ts-expect-error HTTP callback Connectors were retired; serve Connectors over Backend Connections.
     import { ConnectorKeySet, verifyConnectorCallback, readConnectorCallContext } from "@tidblink/server";
+    // @ts-expect-error Connector transports were retired with registration.
+    import type { ConnectorTransport } from "@tidblink/server";
     // @ts-expect-error Connector registration types were removed with registration.
     import type { RegisterConnectorInput, UpdateConnectorInput, ConnectorVersionOptions } from "@tidblink/server";
     // @ts-expect-error Previous compatibility constants and error exports have no aliases.
@@ -212,8 +214,10 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       void end;
       await served.close();
       const listed: Connector[] = await organization.connectors.list();
-      const transport: ConnectorTransport = (await organization.connectors.get(served.connectorId)).transport;
-      void listed; void transport;
+      const name: string = (await organization.connectors.get(served.connectorId)).displayName;
+      void listed; void name;
+      // @ts-expect-error A Connector record has no transport or registration fields.
+      void (await organization.connectors.get(served.connectorId)).transport;
       // @ts-expect-error Connectors are created by serving them, not registered.
       await organization.connectors.register({ displayName: "Orders", endpointUrl: "https://orders.example.com/mcp" });
       // @ts-expect-error Connectors are not activated; serving one makes it callable.

@@ -1736,7 +1736,7 @@
             }
           },
           "409": {
-            "description": "The command identity was already used with a different body or target state, a new message or retry targets a read-only Session (session_read_only), a checkpoint retry targets an earlier Session Configuration Epoch (session_configuration_epoch_changed), or a Session Template switch is in progress (session_switch_in_progress). A Turn start is refused when an MCP Server Registration the Session references is disabled or deleted (session_execution_dependency_unavailable), or when an MCP Authorization it needs is not usable (mcp_authorization_required): details.registrations lists each such registration with its serverId, owner (organization or end_user) and reason (missing, invalid, revoked or insufficient_scope). Only a message that would start a new Turn is checked, never one steered into a running Turn. Nothing is saved, so the same clientEventId can be sent again once the authorization is usable.",
+            "description": "The command identity was already used with a different body or target state, a new message or retry targets a read-only Session (session_read_only), a checkpoint retry targets an earlier Session Configuration Epoch (session_configuration_epoch_changed), or a Session Template switch is in progress (session_switch_in_progress). A Turn start is refused when an MCP Server Registration the Session references is disabled or deleted (session_execution_dependency_unavailable), or when an MCP Authorization it needs is not usable (mcp_authorization_required): details.registrations lists each such registration with its serverId, owner (organization or end_user) and reason (missing, invalid, revoked, insufficient_scope or catalog_unavailable). Only a message that would start a new Turn is checked, never one steered into a running Turn. Nothing is saved, so the same clientEventId can be sent again once the authorization is usable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4492,6 +4492,9 @@
                   "mcp_authorization_required",
                   "mcp_oauth_unavailable",
                   "mcp_oauth_confirmation_invalid",
+                  "mcp_authorization_mode_mismatch",
+                  "mcp_credential_rejected",
+                  "mcp_catalog_discovery_failed",
                   "model_provider_unconfigured",
                   "sandbox_unconfigured",
                   "sandbox_validation_pending",
@@ -4562,6 +4565,8 @@
                   "skill_name_conflict",
                   "skill_delete_blocked",
                   "mcp_server_delete_blocked",
+                  "mcp_server_name_conflict",
+                  "mcp_server_version_conflict",
                   "invalid_skill_package",
                   "skill_ingestion_not_found",
                   "skill_import_job_not_found",
@@ -9585,13 +9590,14 @@
                                             ]
                                           },
                                           "reason": {
-                                            "description": "missing: no usable authorization with a catalog exists; invalid: it was invalidated by an endpoint or mode change, or the server refused its credential with HTTP 401 or 403 during a Turn; revoked: its credential was revoked; insufficient_scope: the server answered 403 insufficient_scope, requiring a scope it lacks.",
+                                            "description": "missing: no usable authorization exists; invalid: it was invalidated by an endpoint or mode change, or the server refused its credential with HTTP 401 or 403 during a Turn; revoked: its credential was revoked; insufficient_scope: the server answered 403 insufficient_scope, requiring a scope it lacks; catalog_unavailable: it is usable, but no catalog has been discovered under it yet, or its discovery failed, as the authorization's catalogFailure says; refreshing its catalog resolves it.",
                                             "type": "string",
                                             "enum": [
                                               "missing",
                                               "invalid",
                                               "revoked",
-                                              "insufficient_scope"
+                                              "insufficient_scope",
+                                              "catalog_unavailable"
                                             ]
                                           }
                                         },
@@ -10279,13 +10285,14 @@
                                             ]
                                           },
                                           "reason": {
-                                            "description": "missing: no usable authorization with a catalog exists; invalid: it was invalidated by an endpoint or mode change, or the server refused its credential with HTTP 401 or 403 during a Turn; revoked: its credential was revoked; insufficient_scope: the server answered 403 insufficient_scope, requiring a scope it lacks.",
+                                            "description": "missing: no usable authorization exists; invalid: it was invalidated by an endpoint or mode change, or the server refused its credential with HTTP 401 or 403 during a Turn; revoked: its credential was revoked; insufficient_scope: the server answered 403 insufficient_scope, requiring a scope it lacks; catalog_unavailable: it is usable, but no catalog has been discovered under it yet, or its discovery failed, as the authorization's catalogFailure says; refreshing its catalog resolves it.",
                                             "type": "string",
                                             "enum": [
                                               "missing",
                                               "invalid",
                                               "revoked",
-                                              "insufficient_scope"
+                                              "insufficient_scope",
+                                              "catalog_unavailable"
                                             ]
                                           }
                                         },
@@ -12021,13 +12028,14 @@
                           ]
                         },
                         "reason": {
-                          "description": "missing: no usable authorization with a catalog exists; invalid: it was invalidated by an endpoint or mode change, or the server refused its credential with HTTP 401 or 403 during a Turn; revoked: its credential was revoked; insufficient_scope: the server answered 403 insufficient_scope, requiring a scope it lacks.",
+                          "description": "missing: no usable authorization exists; invalid: it was invalidated by an endpoint or mode change, or the server refused its credential with HTTP 401 or 403 during a Turn; revoked: its credential was revoked; insufficient_scope: the server answered 403 insufficient_scope, requiring a scope it lacks; catalog_unavailable: it is usable, but no catalog has been discovered under it yet, or its discovery failed, as the authorization's catalogFailure says; refreshing its catalog resolves it.",
                           "type": "string",
                           "enum": [
                             "missing",
                             "invalid",
                             "revoked",
-                            "insufficient_scope"
+                            "insufficient_scope",
+                            "catalog_unavailable"
                           ]
                         }
                       },
@@ -13486,13 +13494,14 @@
                                     ]
                                   },
                                   "reason": {
-                                    "description": "missing: no usable authorization with a catalog exists; invalid: it was invalidated by an endpoint or mode change, or the server refused its credential with HTTP 401 or 403 during a Turn; revoked: its credential was revoked; insufficient_scope: the server answered 403 insufficient_scope, requiring a scope it lacks.",
+                                    "description": "missing: no usable authorization exists; invalid: it was invalidated by an endpoint or mode change, or the server refused its credential with HTTP 401 or 403 during a Turn; revoked: its credential was revoked; insufficient_scope: the server answered 403 insufficient_scope, requiring a scope it lacks; catalog_unavailable: it is usable, but no catalog has been discovered under it yet, or its discovery failed, as the authorization's catalogFailure says; refreshing its catalog resolves it.",
                                     "type": "string",
                                     "enum": [
                                       "missing",
                                       "invalid",
                                       "revoked",
-                                      "insufficient_scope"
+                                      "insufficient_scope",
+                                      "catalog_unavailable"
                                     ]
                                   }
                                 },
@@ -14181,13 +14190,14 @@
                                     ]
                                   },
                                   "reason": {
-                                    "description": "missing: no usable authorization with a catalog exists; invalid: it was invalidated by an endpoint or mode change, or the server refused its credential with HTTP 401 or 403 during a Turn; revoked: its credential was revoked; insufficient_scope: the server answered 403 insufficient_scope, requiring a scope it lacks.",
+                                    "description": "missing: no usable authorization exists; invalid: it was invalidated by an endpoint or mode change, or the server refused its credential with HTTP 401 or 403 during a Turn; revoked: its credential was revoked; insufficient_scope: the server answered 403 insufficient_scope, requiring a scope it lacks; catalog_unavailable: it is usable, but no catalog has been discovered under it yet, or its discovery failed, as the authorization's catalogFailure says; refreshing its catalog resolves it.",
                                     "type": "string",
                                     "enum": [
                                       "missing",
                                       "invalid",
                                       "revoked",
-                                      "insufficient_scope"
+                                      "insufficient_scope",
+                                      "catalog_unavailable"
                                     ]
                                   }
                                 },

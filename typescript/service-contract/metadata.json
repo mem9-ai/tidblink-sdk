@@ -1,13 +1,13 @@
 {
-  "tidbLinkRevision": "501eee1c608111c1f04ac9311b9c55ed90be8170",
+  "tidbLinkRevision": "07d1f9c85c0fedd729c76c4cb4a48485d139c8ff",
   "tidbLinkApiVersion": "0.0.1",
-  "sourceOpenApiSha256": "29f5ea39cc310ce69ece6b2351fac64bba015c07e83dd11a532be3e073feb96b",
+  "sourceOpenApiSha256": "74215cefcabb18e915fa6a13d4a4dbcbd3720aa1eb5b522e0fd3e83d2b6ad131",
   "snapshots": {
-    "openapi.json": "27ceaa6b2d9a56b6b2fc65ed1be3195be4f182f76a8d97114aee57dab413d55c",
-    "files.json": "af5df72582ad9e11332cbf5364fb367a4eba3717d32d2980681d610c4968de8c",
-    "management.json": "af4f8ed4c43d3237ff9db578c6999933d2babf5020d89f35102cf83ff245342c",
-    "connectors.json": "780ff2f372d0ecb0fe44d392ce4d3106712bcb10b1d69bd304610d8ddc4048cf",
-    "audio.json": "4b6f2c420ff647bc791499f0253b293230db80499077e3dca4cd024dfb79af97",
-    "backend-connection.json": "b14004c6cfb7c6a147114195ce864b71abb94a4a5fa2e0c5d6fb953f14acc870"
+    "openapi.json": "1d769097d91ecf83af69b58fa762eb8524bb346bf8338b0fe1d20849d9e40a04",
+    "files.json": "e8815d7dea2d93029f6e62c54393dafb7b234a6bb47adcec6f97c0f8323c5d3d",
+    "management.json": "160718508790838023d7498b288bf27eb15cfed12dc993ddc0016394b73ec802",
+    "connectors.json": "46f4e4fe0b6169abb934c2e27b237f27a591d7d1d1eae1314a1eb77abf5b2ead",
+    "audio.json": "59ea836fd783296305d1bf5b70eebbe551a0ff38e92ad132f2d45bcc9fecff20",
+    "backend-connection.json": "c3f80f92bc8cfe42f31483caae0512e2b54df82171d1781b665859874b7da593"
   }
 }

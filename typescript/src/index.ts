@@ -2,7 +2,7 @@
 export const TIDB_LINK_API_VERSION = "0.0.1" as const;
 /** Exact service baseline for the supported refreshed SDK surface. */
 export const TIDB_LINK_REVISION =
-  "501eee1c608111c1f04ac9311b9c55ed90be8170" as const;
+  "07d1f9c85c0fedd729c76c4cb4a48485d139c8ff" as const;
 
 export {
   TiDBLinkApiError,
@@ -67,7 +67,7 @@ export type {
   WaitForSkillUploadOptions,
 } from "./skills.js";
 export { Connectors } from "./connectors.js";
-export type { Connector, ConnectorTransport } from "./connectors.js";
+export type { Connector } from "./connectors.js";
 export { ServedConnector } from "./connector-serve.js";
 export type { ServeConnectorOptions, ServedConnectorEnd } from "./connector-serve.js";
 export { EndUserClient } from "./user.js";

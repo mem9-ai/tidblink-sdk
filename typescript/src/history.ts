@@ -209,7 +209,7 @@ export interface TurnFailure {
     registrations?: {
       serverId: string;
       owner: "organization" | "end_user";
-      reason: "missing" | "invalid" | "revoked" | "insufficient_scope";
+      reason: "missing" | "invalid" | "revoked" | "insufficient_scope" | "catalog_unavailable";
     }[];
     provider?: {
       category:
