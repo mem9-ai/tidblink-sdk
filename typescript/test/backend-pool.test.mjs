@@ -306,3 +306,33 @@ test("close() detaches every Session, ends them as closed and refuses later atta
   assert.equal((await server.peers[0].closed).code, 1000);
   await assert.rejects(pool.attach(attachment("s2")), /closed/);
 });
+
+test("a refusal with authentication_required, then 4001 at once, fails the request and ends everything for good", async () => {
+  const server = await start({
+    respond: (message, peer) => {
+      if (message.method !== "session.attach" || message.params.sessionId !== "s2") return undefined;
+      // The core answers, then closes the connection without delay.
+      peer.send({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32000, message: "Refused", data: { reason: "authentication_required" } },
+      });
+      peer.close(4001, "authentication failed");
+      return "silent";
+    },
+  });
+  const pool = poolFor(server);
+  const first = attachment("s1");
+  await pool.attach(first);
+  await assert.rejects(
+    pool.attach(attachment("s2")),
+    (error) => error instanceof BackendRequestError && error.reason === "authentication_required",
+  );
+  await until(() => first.ends.length === 1);
+  assert.equal(first.ends[0].reason, "error");
+  assert.equal(first.ends[0].error.code, 4001);
+  // Nothing reconnects with the invalid Key.
+  await delay(300);
+  assert.equal(server.peers.length, 1);
+  assert.equal(pool.connections, 0);
+});

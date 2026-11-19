@@ -51,6 +51,11 @@ from .connectors import (
     Connector,
     ConnectorTransport,
 )
+from .connector_serve import (
+    ServedConnector,
+    ServedConnectorEnd,
+    ToolCallConnector,
+)
 from .files import (
     UserFiles,
     UserFile,
@@ -184,9 +189,9 @@ from .user import AgentModelCatalog, AgentTemplate, AgentTemplatePage, EndUserCl
 #: TiDB Link OpenAPI version supported by this SDK release.
 TIDB_LINK_API_VERSION = "0.0.1"
 #: Exact service baseline for the supported SDK surface.
-TIDB_LINK_REVISION = "c21a5e3a091c938576ee3bb36cba72baf0e87022"
+TIDB_LINK_REVISION = "501eee1c608111c1f04ac9311b9c55ed90be8170"
 #: SHA-256 of that service revision's ``docs/openapi.yaml``.
-TIDB_LINK_OPENAPI_SHA256 = "0b7b19720f557a0b3385b297cf59207e94d6c087100192d4f65800642dc491ba"
+TIDB_LINK_OPENAPI_SHA256 = "29f5ea39cc310ce69ece6b2351fac64bba015c07e83dd11a532be3e073feb96b"
 
 __all__ = [
     "OMIT",
@@ -247,6 +252,9 @@ __all__ = [
     "Connectors",
     "Connector",
     "ConnectorTransport",
+    "ServedConnector",
+    "ServedConnectorEnd",
+    "ToolCallConnector",
     "UserFiles",
     "UserFile",
     "UserFileSource",

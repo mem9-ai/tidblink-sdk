@@ -1,4 +1,4 @@
-"""Executes the Client Tool calls of an executing Session connection (``client-tool-executor.ts`` in the TypeScript SDK)."""
+"""Executes the calls of an executing Session connection or a served Connector (``client-tool-executor.ts`` in the TypeScript SDK)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from ._http import utf16_length
 if TYPE_CHECKING:
     from ._backend_pool import BackendConnectionPool, BackendLink
 
-__all__ = ["ClientToolCallContext", "ClientToolResultRefusedError", "ClientToolExecutor"]
+__all__ = ["ClientToolCallContext", "ClientToolResultRefusedError", "ClientToolExecutor", "ToolCallConnector"]
 
 OUTPUT_MAX = 65_536
 ERROR_MAX = 4_096
@@ -28,7 +28,7 @@ CallState = Literal["claiming", "running", "settled"]
 
 
 class ClientToolResultRefusedError(TiDBLinkError):
-    """Raised through ``on_error`` when the core did not accept a Client Tool result.
+    """Raised through ``on_error`` when the core did not accept a Client Tool or Connector function result.
 
     ``reason`` is the core's: ``call_settled`` (the call already had an
     outcome, for example its deadline passed), ``not_claimed`` or
@@ -42,10 +42,20 @@ class ClientToolResultRefusedError(TiDBLinkError):
 
 
 @dataclass(frozen=True)
-class ClientToolCallContext:
-    """What a Client Tool handler learns about the call it runs.
+class ToolCallConnector:
+    """The Connector whose function a call runs, as ``serve_connector`` served it."""
 
-    At ``deadline_at`` the SDK cancels the handler's task and reports the
+    #: The connectorId ``connector.serve`` answered.
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class ClientToolCallContext:
+    """What a Client Tool or Connector function handler learns about the call it runs.
+
+    A Connector call can come from any Session of the Organization. At
+    ``deadline_at`` the SDK cancels the handler's task and reports the
     timeout to the core, which then reports the effect as unknown.
     """
 
@@ -57,6 +67,8 @@ class ClientToolCallContext:
     name: str
     #: Submit the result before this time.
     deadline_at: datetime
+    #: On a Connector call only: the Connector whose function runs.
+    connector: ToolCallConnector | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +80,8 @@ class _ToolCall:
     name: str
     arguments: dict[str, Any]
     deadline_at: datetime
+    #: Present on a Connector call only.
+    connector: ToolCallConnector | None = None
 
     @property
     def deadline(self) -> float:
@@ -94,6 +108,18 @@ def _parse_call(params: Mapping[str, Any]) -> _ToolCall | None:
     deadline_at = _parse_date(params["deadlineAt"])
     if deadline_at is None:
         return None
+    connector: ToolCallConnector | None = None
+    if "connector" in params:
+        reference = params["connector"]
+        if not (
+            isinstance(reference, dict)
+            and isinstance(reference.get("id"), str)
+            and reference["id"]
+            and isinstance(reference.get("name"), str)
+            and reference["name"]
+        ):
+            return None
+        connector = ToolCallConnector(id=reference["id"], name=reference["name"])
     return _ToolCall(
         call_id=params["callId"],
         session_id=params["sessionId"],
@@ -102,6 +128,7 @@ def _parse_call(params: Mapping[str, Any]) -> _ToolCall | None:
         name=params["name"],
         arguments=params["arguments"],
         deadline_at=deadline_at.astimezone(timezone.utc),
+        connector=connector,
     )
 
 
@@ -135,23 +162,29 @@ def _error_of(error: BaseException) -> dict[str, Any]:
 
 
 class ClientToolExecutor:
-    """Executes the Client Tool calls an executing Session connection receives.
+    """Executes the calls an executing Session connection or a served Connector receives.
 
-    Claim first, run only after ``claimed: true``, then submit the result over
-    any Backend Connection until the call's deadline. Each callId runs at most
-    once.
+    Claim on the connection that delivered the call, run only after
+    ``claimed: true``, then submit the result over any Backend Connection
+    until the call's deadline. Each callId runs at most once. Pass exactly
+    one source: ``session_id`` for one Session's Client Tools, or
+    ``connector_name`` for one served Connector's functions.
     """
 
     def __init__(
         self,
         *,
         pool: BackendConnectionPool,
-        session_id: str,
         handlers: Mapping[str, Any],
         report: Callable[[BaseException], None],
+        session_id: str | None = None,
+        connector_name: str | None = None,
     ) -> None:
+        if (session_id is None) == (connector_name is None):
+            raise ValueError("ClientToolExecutor needs either session_id or connector_name")
         self._pool = pool
         self._session_id = session_id
+        self._connector_name = connector_name
         #: Normalized handlers: name -> object with ``run``.
         self._handlers = handlers
         self._report = report
@@ -160,8 +193,12 @@ class ClientToolExecutor:
     def receive(self, params: Mapping[str, Any], link: BackendLink) -> None:
         """Handle one ``tool.call`` from the connection that delivered it."""
         call = _parse_call(params)
-        if call is None or call.session_id != self._session_id:
-            self._report(TiDBLinkError("Received an invalid Client Tool call"))
+        if self._connector_name is None:
+            if call is None or call.connector is not None or call.session_id != self._session_id:
+                self._report(TiDBLinkError("Received an invalid Client Tool call"))
+                return
+        elif call is None or call.connector is None or call.connector.name != self._connector_name:
+            self._report(TiDBLinkError("Received an invalid Connector call"))
             return
         # The core may send a call again after a reconnect; it runs once.
         if call.call_id in self._calls:
@@ -207,7 +244,12 @@ class ClientToolExecutor:
     async def _execute(self, call: _ToolCall) -> dict[str, Any]:
         handler = self._handlers.get(call.name)
         if handler is None:
-            return {"error": {"message": f"Client Tool {call.name} has no handler in this Application Server"}}
+            message = (
+                f"Connector {call.connector.name} has no function {call.name} in this Application Server"
+                if call.connector is not None
+                else f"Client Tool {call.name} has no handler in this Application Server"
+            )
+            return {"error": {"message": message}}
         context = ClientToolCallContext(
             call_id=call.call_id,
             session_id=call.session_id,
@@ -215,6 +257,7 @@ class ClientToolExecutor:
             turn_id=call.turn_id,
             name=call.name,
             deadline_at=call.deadline_at,
+            connector=call.connector,
         )
 
         async def run() -> dict[str, Any]:

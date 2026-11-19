@@ -29,10 +29,12 @@ export interface TemplateContent {
   skills?: { skillId: string; version: number }[];
   capabilities?: { sessionRecall?: { enabled?: boolean } };
   /**
-   * Organization MCP Servers and Connectors the Template uses, by `serverId`.
-   * On replace, omitting `tools` keeps the current references.
+   * Organization MCP Servers and Connectors the Template uses, by `serverId`
+   * (a Connector's `connectorId`). `toolNames`, for an MCP Server Registration
+   * only, limits the tools it exposes; omit it to expose every tool. On
+   * replace, omitting `tools` keeps the current references.
    */
-  tools?: { mcp: { serverId: string }[] };
+  tools?: { mcp: { serverId: string; toolNames?: string[] }[] };
   /**
    * A task the voice model keeps working on across a Realtime connection;
    * ignored when `realtime` is null.

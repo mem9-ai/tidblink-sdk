@@ -1,22 +1,26 @@
 """Reads of Organization Connectors (``connectors.ts`` in the TypeScript SDK).
 
-Connectors are moving onto the Backend Connection, where serving one
-registers it, so this SDK reads Connectors but does not register or change
-them. The SDK returns the service's values unchanged.
+Serving a Connector with ``OrganizationClient.serve_connector()`` creates it;
+there is no separate registration. The SDK returns the service's values
+unchanged.
 """
 
 from __future__ import annotations
 
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Literal, TypedDict
 
 from ._http import HttpClient, segment
 
 __all__ = ["Connectors", "Connector", "ConnectorTransport", "ConnectorObservation"]
 
-ConnectorTransport = Literal["streamable_http", "tunnel"]
+#: How the platform reaches a Connector. ``backend_connection`` Connectors are
+#: the ones Application Servers serve with ``serve_connector``; the others are
+#: older registrations, which the SDK only reads.
+ConnectorTransport = Literal["backend_connection", "streamable_http", "tunnel"]
+
 
 class ConnectorObservation(TypedDict):
-    """What the service discovered at the endpoint."""
+    """What activation discovered at a ``streamable_http`` endpoint."""
 
     era: Literal["modern", "legacy"]
     protocolVersion: str
@@ -26,20 +30,22 @@ class ConnectorObservation(TypedDict):
 
 
 class Connector(TypedDict):
-    """An Organization-owned MCP tool server that Agents can call."""
+    """An Organization-owned Connector: functions that Sessions call as ``mcp_<name>__<function>``."""
 
     connectorId: str
     organizationId: str
     displayName: str
-    #: The HTTPS MCP endpoint of a ``streamable_http`` Connector.
+    #: The HTTPS MCP endpoint of a ``streamable_http`` Connector; empty otherwise.
     endpointUrl: str
     endpointVersion: int
     transport: ConnectorTransport
+    #: A ``backend_connection`` Connector is active from its first declaration.
     status: Literal["inactive", "active"]
     connectorVersion: int
     createdAt: str
     updatedAt: str
-    observation: NotRequired[ConnectorObservation]
+    #: What activation discovered at a ``streamable_http`` endpoint; ``None`` otherwise.
+    observation: ConnectorObservation | None
 
 
 def _connector_path(connector_id: str) -> str:
@@ -47,7 +53,11 @@ def _connector_path(connector_id: str) -> str:
 
 
 class Connectors:
-    """Organization Connectors: MCP tool servers that Sessions call."""
+    """Reads the Organization's Connectors.
+
+    Serving a Connector with ``OrganizationClient.serve_connector()`` creates
+    it; there is no separate registration.
+    """
 
     def __init__(self, http: HttpClient) -> None:
         self._http = http

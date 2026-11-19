@@ -128,6 +128,11 @@ async def send_over_connection(
                     channel.closed,
                     deadline,
                 )
+            except TimeoutError:
+                # The deadline passed while the message was out without an answer:
+                # the core may have accepted it.
+                ambiguous = True
+                raise
             except Exception as error:
                 if _is_ambiguous(error):
                     # The core may have accepted it; the same clientEventId replays the receipt.

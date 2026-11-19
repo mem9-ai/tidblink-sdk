@@ -29,17 +29,14 @@ export interface UserFile {
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * `user_upload` for an upload by the owner; `session` for a file an
+   * Operation of the owner's Session produced, such as an image or a binary
+   * MCP tool result.
+   */
   source:
     | { kind: "user_upload" }
-    | {
-        kind: "artifact_revision";
-        artifactId: string;
-        revisionId: string;
-        revisionNumber: number;
-        sessionId: string;
-        turnId: string | null;
-        operationId: string | null;
-      };
+    | { kind: "session"; sessionId: string; operationId: string };
 }
 
 export interface FileUploadCapabilities {

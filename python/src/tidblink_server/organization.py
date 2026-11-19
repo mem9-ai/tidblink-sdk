@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 import httpx
 
@@ -28,6 +29,10 @@ from .usage import (
     user_usage_path,
 )
 from .user import EndUserClient
+
+if TYPE_CHECKING:
+    from .connector_serve import ServedConnector
+    from .session_connection import ClientToolHandlers
 
 
 class Organization(TypedDict):
@@ -109,20 +114,45 @@ class OrganizationClient:
 
     @property
     def connectors(self) -> Connectors:
-        """Organization Connectors: MCP tool servers that Sessions call."""
+        """Read the Organization's Connectors. Serve one with :meth:`serve_connector`."""
         return self._connectors
 
     async def close(self) -> None:
-        """Close every Session connection opened through this client, with reason ``closed``, and its Backend Connections.
+        """Close every Session connection opened through this client and stop serving its Connectors, both with reason ``closed``, and close its Backend Connections.
 
-        Later ``connect()`` calls are refused. The HTTP transport the client
-        created is closed too; one passed as ``http_client`` stays open.
+        Later ``connect()`` and ``serve_connector()`` calls are refused. The
+        HTTP transport the client created is closed too; one passed as
+        ``http_client`` stays open.
         """
         try:
             await self._backend.close()
         finally:
             if self._owns_http_client:
                 await self._http.client.aclose()
+
+    async def serve_connector(
+        self,
+        *,
+        name: str,
+        tools: ClientToolHandlers,
+        on_error: Callable[[BaseException], None] | None = None,
+    ) -> ServedConnector:
+        """Serve a Connector's functions from this process over its Backend Connections.
+
+        Creates the Organization's Connector with this ``name`` if it has
+        none. Sessions whose Template references ``connector_id`` call its
+        functions as ``mcp_<name>__<function>``, from any End User's Session,
+        with the same claim, deadline and result rules as Client Tools.
+        ``tools`` is written like ``session.connect(tools=...)``. ``on_error``
+        receives errors that do not end serving: a declaration a connection
+        refused, an invalid call, a result the core did not accept; without it
+        they go to the event loop's exception handler. Returns once one
+        connection serves the Connector; serving keeps a connection open
+        until ``close()``.
+        """
+        from .connector_serve import serve_connector
+
+        return await serve_connector(self._backend, name=name, tools=tools, on_error=on_error)
 
     def user(self, user_id: str) -> EndUserClient:
         """Select the End User who owns the resources; the Organization API Key remains the caller."""

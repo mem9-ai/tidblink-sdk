@@ -18,7 +18,7 @@ languages.
 | Submit audio | Submit prerecorded audio as a Turn | [submit-audio.mjs](../typescript/examples/submit-audio.mjs) | [submit_audio.py](../python/examples/submit_audio.py) |
 | Prepare Realtime | Prepare a Session's Realtime connection for a terminal | [prepare-realtime-connection.mjs](../typescript/examples/prepare-realtime-connection.mjs) | [prepare_realtime_connection.py](../python/examples/prepare_realtime_connection.py) |
 | Read usage | Read a User's usage by period and billing tag | [read-usage.mjs](../typescript/examples/read-usage.mjs) | [read_usage.py](../python/examples/read_usage.py) |
-| HTTP Connector | A minimal MCP server that verifies platform callbacks | [http-connector.mjs](../typescript/examples/http-connector.mjs) | — |
+| Serve a Connector | Serve a cloud capability to every Session over the Backend Connection; answer with the calling user's data | [serve-connector.mjs](../typescript/examples/serve-connector.mjs) | [serve_connector.py](../python/examples/serve_connector.py) |
 
 Add a column when a new SDK lands, and link each example it provides.
 

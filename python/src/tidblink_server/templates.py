@@ -43,7 +43,10 @@ class TemplateSkillReference(TypedDict):
 
 
 class TemplateMcpServerReference(TypedDict):
+    #: An MCP Server Registration's ID, or a Connector's ``connectorId``.
     serverId: str
+    #: For an MCP Server Registration only: limits the tools it exposes; omit it to expose every tool.
+    toolNames: NotRequired[list[str]]
 
 
 class TemplateTools(TypedDict):
@@ -70,8 +73,9 @@ class TemplateContent(TypedDict):
     #: Published Skill versions from ``skills`` or ``templates.catalog()``.
     skills: NotRequired[list[TemplateSkillReference]]
     capabilities: NotRequired[dict[str, Any]]
-    #: Organization MCP Servers and Connectors the Template uses, by ``serverId``.
-    #: On replace, omitting ``tools`` keeps the current references.
+    #: Organization MCP Servers and Connectors the Template uses, by ``serverId``
+    #: (a Connector's ``connectorId``). On replace, omitting ``tools`` keeps the
+    #: current references.
     tools: NotRequired[TemplateTools]
     #: A task the voice model keeps working on across a Realtime connection;
     #: ignored when ``realtime`` is None.

@@ -10,7 +10,7 @@ not ship it to browsers or devices.
 
 It follows the [TypeScript SDK](../typescript/README.md): the same supported
 scope, behaviour, errors and recovery rules, for the same exact service
-revision ([c21a5e3a](https://github.com/mem9-ai/agent-stack/commit/c21a5e3a091c938576ee3bb36cba72baf0e87022)).
+revision ([501eee1c](https://github.com/mem9-ai/agent-stack/commit/501eee1c608111c1f04ac9311b9c55ed90be8170)).
 The TypeScript README is the reference for what each capability does and how to
 recover from an uncertain outcome; this README covers how that surface looks in
 Python.
@@ -18,7 +18,7 @@ Python.
 ## Supported scope
 
 Organization information, End User provisioning, Template and Skill
-management, Connector reads, Template/model discovery, Session
+management, serving Connectors and reading them, Template/model discovery, Session
 management and Template switches, text submission, steering, cancellation,
 checkpoint retry, original-result waiting, Client Tools, Session connections
 over Backend Connections with progress and events, conversation history, file
@@ -170,6 +170,12 @@ await conn.close()
 end = await conn.closed  # SessionConnectionEnd(reason="closed")
 ```
 
+`conn.send()` raises the same errors as `session.turn()`. Once the message is
+sent, its `timeout` never raises a plain `TimeoutError`, since the core may
+already have the message: it raises `TurnWaitTimeoutError` with `input_id`;
+recover with `session.wait_for_result(input_id)` or send again with the same
+`client_event_id`.
+
 A Client Tool call made while no connection executes the Session is reported to
 the model as not performed at once: no `run` handler sees it, and no
 `requires_action` event or audio `client_tool_calls` frame records it. Calls
@@ -217,12 +223,84 @@ upload = await organization.skills.upload(data=zip_bytes, idempotency_key=upload
 connectors = await organization.connectors.list()
 ```
 
-Connectors are moving onto the Backend Connection, where serving a Connector
-registers it, and the HTTP callback route is going away. So unlike the
-TypeScript SDK 0.4, this SDK only lists and reads Connectors
-(`connectors.list()`, `connectors.get(connector_id)`): it has no Connector
-registration, activation or callback verification, and no HTTP Connector
-example.
+A Connector is a **cloud capability**: functions your backend provides to the
+Sessions of every End User, such as an order lookup or a knowledge base. (Device
+functions are [Client Tools](#connecting-a-session) instead.) Your backend
+serves a Connector over the same Backend Connections that carry Session
+connections, so it needs no public endpoint, no callback verification and no
+separate registration:
+
+```python
+from tidblink_server import ClientToolHandler
+
+
+async def get_order(args, context):
+    # Answer only with the data of the End User whose Session made the call.
+    return json.dumps(await db.orders.find(context.user_id, args["orderId"]))  # cancelled at context.deadline_at
+
+
+orders = await organization.serve_connector(
+    name="orders",
+    tools={
+        "get_order": ClientToolHandler(
+            description="Read one of the current user's orders",
+            parameters={
+                "type": "object",
+                "properties": {"orderId": {"type": "string"}},
+                "required": ["orderId"],
+            },
+            run=get_order,
+        )
+    },
+    on_error=lambda error: log.warning("Connector error: %s", error),
+)
+orders.connector_id  # reference it from a Template: content["tools"] = {"mcp": [{"serverId": ...}]}
+await orders.close()  # stop serving, for example on shutdown
+end = await orders.closed  # ServedConnectorEnd(reason="closed")
+```
+
+- **Serving is registration.** The first `serve_connector` with a name creates
+  the Organization's Connector with that name; later ones, from any process or
+  Key of the Organization, serve the same Connector and answer the same
+  `connector_id`. The latest declaration served is what new Turns use.
+  `organization.connectors.list()` and `get(connector_id)` read Connectors;
+  there is nothing to activate or edit.
+- **Names.** The Connector name and each function name are lowercase letters
+  and digits joined by single underscores, 1 to 29 characters. The model sees
+  each function as `mcp_<name>__<function>`, for example `mcp_orders__get_order`.
+  At most 64 functions; `parameters` is a JSON Schema with `"type": "object"`
+  that may not define or require `async`, which the platform reserves. Invalid
+  arguments raise `TypeError` or `ValueError` before anything is sent. Serving a
+  name this client already serves raises `TiDBLinkError`; close the first one.
+- **Handlers.** `tools` is written exactly like `session.connect(tools=...)`:
+  `ClientToolHandler`s or mappings with `description`, `parameters` and `run`.
+  `run(args, context)` receives the `ClientToolCallContext` of a Client Tool
+  (`call_id`, `session_id`, `user_id`, `turn_id`, `name`, `deadline_at`) whose
+  `connector` is a `ToolCallConnector(id, name)`; on a Client Tool call it is
+  `None`. Calls come from any Session whose Template references the Connector,
+  of any End User; `user_id` names the Session's owner, so act for that user
+  rather than trusting model arguments. Return text, or a value sent as JSON;
+  raise to report a failure, whose message the model sees.
+- **Claim and deadline.** The core sends each call to one connection serving
+  the Connector, preferring the one executing the calling Session. The SDK
+  claims it there and runs the handler only once the claim is granted, at most
+  once per `call_id`, and submits the result over any connection. At
+  `deadline_at`, 60 seconds after the call, the SDK cancels the `run` task, and
+  the model is then told the result is unknown.
+- **Availability.** Serving keeps at least one Backend Connection open, declares
+  the Connector on every connection the client opens, and declares it again
+  after a reconnect or `connection.drain`. When no process serves the
+  Connector, its calls end at once as not performed and the Turn continues: the
+  model is told the function did not run. `closed` resolves with
+  `ServedConnectorEnd(reason="closed")` after `close()` or
+  `organization.close()`, or `ServedConnectorEnd(reason="error", error=...)`
+  when no connection can serve it any more, for example after the Key was
+  revoked. `on_error` receives errors that do not end serving (a declaration a
+  connection refused, an invalid call, a result the core did not accept);
+  without it they go to the event loop's exception handler.
+
+[`examples/serve_connector.py`](examples/serve_connector.py) serves an `orders`
+Connector from your own order data.
 
 ## Examples
 

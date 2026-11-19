@@ -280,3 +280,19 @@ async def test_send_returns_only_once_the_session_released_the_turn_or_with_the_
     release = False
     reply = await conn.send("Too bright", client_event_id="msg_1", timeout=0.3)
     assert reply.text == "Dimmed to 40%."
+
+
+async def test_a_send_whose_deadline_passes_while_its_answer_is_outstanding_has_an_unknown_outcome(
+    harness: Harness,
+) -> None:
+    def respond(message: dict[str, Any], peer: Peer, index: int) -> Any:
+        # The core received the message but has not answered yet.
+        return "silent" if message["method"] == "session.send" else None
+
+    core = await harness.core(respond=respond)
+    conn = await session_of(harness, core).connect()
+    with pytest.raises(TurnWaitTimeoutError) as timed_out:
+        await conn.send("x", client_event_id="msg_1", timeout=0.05)
+    assert timed_out.value.input_id == "msg_1"
+    assert timed_out.value.session_id == "sess_1"
+    assert isinstance(timed_out.value.__cause__, TimeoutError)

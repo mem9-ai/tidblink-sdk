@@ -35,6 +35,7 @@ const source = await readFile(join(root, "docs/openapi.yaml"));
 const sourceSha256 = sha256(source);
 const document = parse(source.toString("utf8"));
 
+const HTTP_METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 const user = "/api/v1/org/users/{userId}";
 const session = `${user}/sessions/{id}`;
 
@@ -98,13 +99,11 @@ const snapshots = {
       "/api/v1/org/skills/uploads/{uploadId}/publish",
     ],
   },
+  // Only the reads: Connectors are served over the Backend Connection.
   "connectors.json": {
     paths: [
-      "/api/v1/org/connectors",
-      "/api/v1/org/connectors/{connectorId}",
-      "/api/v1/org/connectors/{connectorId}/activate",
-      "/api/v1/org/connectors/{connectorId}/deactivate",
-      "/api/v1/connectors/jwks",
+      { path: "/api/v1/org/connectors", methods: ["get"] },
+      { path: "/api/v1/org/connectors/{connectorId}", methods: ["get"] },
     ],
   },
   "audio.json": {
@@ -115,10 +114,22 @@ const snapshots = {
 
 for (const [name, selection] of Object.entries(snapshots)) {
   const paths = {};
-  for (const path of selection.paths) {
+  for (const entry of selection.paths) {
+    // A route, or `{ path, methods }` to freeze only some of its operations.
+    const { path, methods } = typeof entry === "string" ? { path: entry } : entry;
     const item = document.paths[path];
     if (!item) throw new Error(`${name}: service has no route ${path}`);
-    paths[path] = item;
+    if (!methods) {
+      paths[path] = item;
+      continue;
+    }
+    paths[path] = Object.fromEntries(
+      Object.entries(item).filter(
+        ([key]) => methods.includes(key) || !HTTP_METHODS.includes(key),
+      ),
+    );
+    for (const method of methods)
+      if (!paths[path][method]) throw new Error(`${name}: service has no ${method} ${path}`);
   }
   const components = collectComponents(paths, selection.schemas ?? []);
   const snapshot = selection.full

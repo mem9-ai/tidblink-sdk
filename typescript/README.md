@@ -7,13 +7,13 @@ stay on your backend; do not ship it to browsers or devices.
 ## Supported scope
 
 This package supports Organization information, End User provisioning,
-Template, Skill and Connector management, Connector callback verification,
+Template and Skill management, serving Connectors and reading them,
 Template/model discovery, Session management and Template switches,
 text submission, steering, cancellation, checkpoint retry, original-result waiting,
 continuous progress, Client Tools, Session connections over Backend Connections,
 conversation history, file attachments,
 Realtime Model/Connection preparation, prerecorded audio and User usage reads for [service revision
-c21a5e3a](https://github.com/mem9-ai/agent-stack/commit/c21a5e3a091c938576ee3bb36cba72baf0e87022).
+501eee1c](https://github.com/mem9-ai/agent-stack/commit/501eee1c608111c1f04ac9311b9c55ed90be8170).
 
 Text commands return durable receipts independently of execution. Waiting reads the
 original command's outcome. The service has no Agent: a Session is created
@@ -24,10 +24,11 @@ an explicitly selected End User; User API Keys are not supported.
 ## Quick start
 
 Install an exact published version. Stable versions are on the `latest`
-dist-tag and prereleases on `next`:
+dist-tag and prereleases on `next`. This prerelease and `serveConnector` are on
+`next`:
 
 ```sh
-npm install --save-exact @tidblink/server
+npm install --save-exact @tidblink/server@next
 ```
 
 An application backend uses its Organization API Key (`ti_org_…`) and explicitly
@@ -181,53 +182,71 @@ published Skills and their versions.
 
 ## Connectors
 
-A Connector is an Organization-owned MCP tool server that Sessions call. The
-platform calls it for the End User who owns the Session and names that User in
-every call, so your server can act on the right account without trusting model
-arguments.
+A Connector is a **cloud capability**: functions your backend provides to the
+Sessions of every End User, such as an order lookup or a knowledge base. (Device
+functions are [Client Tools](#client-tools-on-a-connection) instead.) Your
+backend serves a Connector over the same Backend Connections that carry Session
+connections, so it needs no public endpoint, no callback verification and no
+separate registration:
 
 ```js
-let connector = await organization.connectors.register({
-  displayName: "Orders",
-  endpointUrl: "https://orders.example.com/mcp",
+const orders = await organization.serveConnector({
+  name: "orders",
+  tools: {
+    get_order: {
+      description: "Read one of the current user's orders",
+      parameters: {
+        type: "object",
+        properties: { orderId: { type: "string" } },
+        required: ["orderId"],
+      },
+      // Answer only with the data of the End User whose Session made the call.
+      run: async ({ orderId }, { userId, signal }) =>
+        JSON.stringify(await db.orders.find(userId, orderId, { signal })),
+    },
+  },
+  onError: (error) => log.warn(error),
 });
-// Activation connects to the endpoint and discovers its tools.
-connector = await organization.connectors.activate(connector.connectorId, {
-  expectedConnectorVersion: connector.connectorVersion,
-});
+orders.connectorId; // reference it from a Template: content.tools.mcp = [{ serverId }]
+await orders.close(); // stop serving, for example on shutdown
 ```
 
-Edit (`update`) only an inactive Connector, and pass the `connectorVersion` you
-read to every change; a stale one is a `ConflictError`. `deactivate` stops new
-calls. Registration is not retried automatically: after an `OutcomeUnknownError`,
-list the Connectors and match the display name, which is unique. Templates refer
-to Connectors through Console tool settings; this SDK does not set them.
+- **Serving is registration.** The first `serveConnector` with a name creates
+  the Organization's Connector with that name; later ones, from any process or
+  Key of the Organization, serve the same Connector and answer the same
+  `connectorId`. The latest declaration served is what new Turns use.
+  `organization.connectors.list()` and `get()` read Connectors; there is nothing
+  to activate or edit.
+- **Names.** The Connector name and each function name are lowercase letters
+  and digits joined by single underscores, 1 to 29 characters. The model sees
+  each function as `mcp_<name>__<function>`, for example `mcp_orders__get_order`.
+  At most 64 functions; `parameters` is a JSON Schema with `type: "object"` that
+  may not define or require `async`, which the platform reserves. Invalid
+  options throw a `TypeError` before anything is sent. Serving a name this
+  client already serves throws; close the first one.
+- **Handlers.** `tools` is written exactly like `session.connect({ tools })`.
+  `run` receives the call context of a Client Tool (`callId`, `sessionId`,
+  `userId`, `turnId`, `name`, `deadlineAt`, `signal`) and `connector: { id,
+  name }`. Calls come from any Session whose Template references the
+  Connector, of any End User; `userId` names the Session's owner, so act for that
+  user rather than trusting model arguments. Return text, or a value sent as
+  JSON; throw to report a failure, whose message the model sees.
+- **Claim and deadline.** The core sends each call to one connection serving
+  the Connector, preferring the one executing the calling Session. The SDK claims
+  it there and runs the handler only once the claim is granted, at most once per
+  `callId`, and submits the result over any connection. `signal` aborts at
+  `deadlineAt`; a call without a result by then has an unknown effect, and the
+  model is told so.
+- **Availability.** Serving keeps at least one Backend Connection open, declares
+  the Connector on every connection the client opens, and declares it again after
+  a reconnect or `connection.drain`. When no process serves the Connector, its
+  calls end at once as not performed and the Turn continues: the model is told
+  the function did not run. `closed` resolves with `{ reason: "closed" }` after
+  `close()` or `organization.close()`, or `{ reason: "error", error }` when no
+  connection can serve it any more, for example after the Key was revoked.
 
-Your Connector verifies every request the platform sends (initialization, tool
-discovery and tool calls) with `verifyConnectorCallback`, and reads who a tool
-call is for with `readConnectorCallContext`:
-
-```js
-import { ConnectorKeySet, verifyConnectorCallback, readConnectorCallContext } from "@tidblink/server";
-
-// Fetch keys only from your trusted deployment URL; they are cached.
-const keys = new ConnectorKeySet({ baseUrl });
-await verifyConnectorCallback(request.headers.authorization, {
-  keys, organizationId, connectorId,
-}); // Throws ConnectorAuthError: answer 401.
-// For tools/call:
-const { callId, userId, sessionId, deadline } = readConnectorCallContext(
-  message.params._meta, { organizationId },
-);
-```
-
-Tokens are Ed25519-signed, valid for at most 60 seconds, scoped to your
-Organization and Connector, and may be reused within that scope. Deduplicate side
-effects by `callId`; the platform never retries a call (`attempt` is always 1).
-Abandon work after `deadline`. The packaged `http-connector.mjs` example is a
-complete Connector over Streamable HTTP without an MCP library. The model sees each
-tool as `mcp_<server name>__<tool>`. This SDK does not include a client for the
-`tunnel` transport.
+The packaged `serve-connector.mjs` example serves an `orders` Connector from
+your own order data.
 
 ## Templates and Sessions
 
@@ -401,7 +420,7 @@ The Handoff Turn summarizes the Session so far for the target Template. History
 reads return it as a Turn with `kind: "template_handoff"`, no `userMessage` and
 an empty `userMessages`; when it succeeds, its assistant Message is the summary.
 The service's
-[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/c21a5e3a091c938576ee3bb36cba72baf0e87022/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
+[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/501eee1c608111c1f04ac9311b9c55ed90be8170/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
 describes what the Session keeps across a switch (models, Billing Tag, Client
 Tools and creation options) and that cancelling the Handoff Turn fails the
 switch.
@@ -655,6 +674,12 @@ return reply.text;
   sends the message again with the same `clientEventId`, which the core
   deduplicates; if it cannot, the call raises `OutcomeUnknownError` with
   `inputId`, and `session.waitForResult(inputId)` recovers the result.
+- Once the message is sent, stopping the call never raises a plain timeout or
+  abort, since the core may already have it: the deadline raises
+  `TurnWaitTimeoutError` and `signal` raises `OutcomeUnknownError`, both with
+  `inputId`. Recover with `session.waitForResult(inputId)`, or send again with
+  the same `clientEventId`. Only a call stopped before sending raises the
+  signal's own reason.
 - A refusal of the message command, such as `session_read_only` or
   `turn_admission_closed`, raises `BackendRequestError` with that code as
   `reason` and the REST `details`.
@@ -725,8 +750,9 @@ on_message("lamp/{id}/voice_grant", grant) {  // audio goes to TiDB Link directl
 }
 ```
 
-Cloud capabilities such as a warranty lookup belong in a Connector the
-Template references (see [Connectors](#connectors)), not in the lamp's tools.
+Cloud capabilities such as a warranty lookup belong in a Connector that the
+backend serves with `serveConnector` and the Template references (see
+[Connectors](#connectors)), not in the lamp's tools.
 
 The connection uses the global `WebSocket` of Node.js 22, which sends the
 Organization API Key in the upgrade's `Authorization` header and never in the
@@ -1162,7 +1188,7 @@ packed artifact in a clean ESM TypeScript consumer. To verify the packed SDK and
 its examples against the real service, use the service's Node.js 26 runtime, install its
 pinned dependencies, generate Prisma, build its Hardware contract and prepare its
 current schema in a **dedicated test database**. See the selected service's
-[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/c21a5e3a091c938576ee3bb36cba72baf0e87022/docs/prisma-first-tidb-validation-and-rollout.md).
+[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/501eee1c608111c1f04ac9311b9c55ed90be8170/docs/prisma-first-tidb-validation-and-rollout.md).
 
 ```sh
 AGENT_SERVICE_ROOT=/path/to/agent-stack \
@@ -1186,8 +1212,8 @@ separate process installs the tarball in a clean directory and calls only the
 installed SDK and packaged Organization example for its application workflow.
 It verifies Organization provisioning, discovery, Session
 creation replay, owner isolation, file upload/download and message attachment,
-text results and history, Client Tools on a Backend Connection, Connector registration and a Session's call
-to the example HTTP Connector, audio,
+text results and history, Client Tools on a Backend Connection, a Session's calls
+to a Connector served with `serveConnector` and to one no process serves, audio,
 Realtime HTTP grants, rotation/revocation and fresh-authority recovery. Management credential changes
 and controlled suppliers are fixture actions, not claimed SDK APIs. WebSocket
 redemption, live speech suppliers, physical hardware and deployment compatibility
@@ -1227,7 +1253,7 @@ They cover recorded input, malformed/unsupported recordings, supplier refusals,
 model failure, active-response interruption and the installed audio example.
 The public Session projection exposes the frozen Template digest but hides the
 stored creation options. Those snapshots and active-Turn model freezing also rely
-on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/c21a5e3a091c938576ee3bb36cba72baf0e87022/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
+on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/501eee1c608111c1f04ac9311b9c55ed90be8170/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
 prove those hidden values.
 Usage cases seed controlled facts and verify both public projections, exact filters,
 paging and authority without executing messages to manufacture billing data.

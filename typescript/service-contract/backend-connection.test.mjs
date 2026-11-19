@@ -174,3 +174,52 @@ test("ping is a request the core answers at once, and Session idle reaches conne
     /agent\.session\.idle follows the terminal events of a Turn once the Session has released it; wait for it before session\.send, an audio Turn or a Template switch/,
   );
 });
+
+test("connector.serve and connector.withdraw declare the Connector functions this connection serves", () => {
+  const serve = definitions.ConnectorServeRequest;
+  assert.equal(serve.properties.method.const, "connector.serve");
+  assert.deepEqual(params("ConnectorServeRequest").required, ["name", "tools"]);
+  const name = params("ConnectorServeRequest").properties.name;
+  assert.equal(name.pattern, "^[a-z0-9]+(_[a-z0-9]+)*$");
+  assert.equal(name.maxLength, 29);
+  const functions = definitions.ConnectorFunctionDeclarations;
+  assert.equal(functions.maxItems, 64);
+  assert.deepEqual(functions.items.required, ["type", "name", "description", "parameters"]);
+  assert.equal(functions.items.properties.name.pattern, "^[a-z0-9]+(_[a-z0-9]+)*$");
+  assert.equal(functions.items.properties.name.maxLength, 29);
+  assert.match(functions.items.properties.parameters.description, /async/);
+  for (const text of [
+    "finds the Organization's Connector with this name, or creates it",
+    "Serving the same name again on this connection replaces",
+    "mcp_<name>__<function name>",
+  ])
+    assert(serve.description.includes(text), text);
+  assert.deepEqual(
+    definitions.ConnectorServeResponse.properties.result.required,
+    ["connectorId"],
+  );
+  assert.equal(definitions.ConnectorWithdrawRequest.properties.method.const, "connector.withdraw");
+  assert.deepEqual(params("ConnectorWithdrawRequest").required, ["name"]);
+  assert.match(schema["x-error-codes"]["-32000"], /connection_draining \(the core sent connection\.drain; attach, send or serve/);
+  assert.match(schema["x-error-codes"]["-32000"], /authentication_required \([^)]*connector\.serve[^)]*4001/);
+});
+
+test("a Connector call carries its Connector, goes to one serving connection and is claimed there", () => {
+  const call = definitions.ToolCall;
+  const connector = call.properties.params.properties.connector;
+  assert.deepEqual(connector.required, ["id", "name"]);
+  assert(!call.properties.params.required.includes("connector"));
+  for (const text of [
+    "goes to exactly one connection serving the Connector",
+    "preferring the connection holding the Session's executing attachment",
+    "never offered to another connection",
+    "With no such connection it is not delivered, at once",
+  ])
+    assert(call.description.includes(text), text);
+  assert(
+    definitions.ToolClaimRequest.description.includes(
+      "A Connector call is granted only to the connection it was sent to",
+    ),
+  );
+  assert(definitions.ToolResultRequest.description.includes("Any Backend Connection of the call's Organization may submit it"));
+});
