@@ -188,9 +188,9 @@ from .user import AgentModelCatalog, AgentTemplate, AgentTemplatePage, EndUserCl
 #: TiDB Link OpenAPI version supported by this SDK release.
 TIDB_LINK_API_VERSION = "0.0.1"
 #: Exact service baseline for the supported SDK surface.
-TIDB_LINK_REVISION = "201c30fb737c29db929880b2f1f06e54fd247a44"
+TIDB_LINK_REVISION = "3e920bc73c754dce4cbd5782811063da770be290"
 #: SHA-256 of that service revision's ``docs/openapi.yaml``.
-TIDB_LINK_OPENAPI_SHA256 = "74215cefcabb18e915fa6a13d4a4dbcbd3720aa1eb5b522e0fd3e83d2b6ad131"
+TIDB_LINK_OPENAPI_SHA256 = "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c"
 
 __all__ = [
     "OMIT",

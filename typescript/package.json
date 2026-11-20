@@ -8,12 +8,16 @@
     "node": ">=22.12"
   },
   "tidbLinkApiVersion": "0.0.1",
-  "tidbLinkRevision": "201c30fb737c29db929880b2f1f06e54fd247a44",
-  "tidbLinkOpenApiSha256": "74215cefcabb18e915fa6a13d4a4dbcbd3720aa1eb5b522e0fd3e83d2b6ad131",
+  "tidbLinkRevision": "3e920bc73c754dce4cbd5782811063da770be290",
+  "tidbLinkOpenApiSha256": "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./gated": {
+      "types": "./dist/gated/index.d.ts",
+      "import": "./dist/gated/index.js"
     },
     "./examples/prepare-realtime-connection.mjs": "./examples/prepare-realtime-connection.mjs",
     "./examples/create-session.mjs": "./examples/create-session.mjs",

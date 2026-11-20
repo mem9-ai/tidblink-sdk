@@ -53,10 +53,16 @@ export interface SessionPage {
   nextCursor: string | null;
 }
 
+let endUserHttpOf: (user: EndUserClient) => HttpClient;
+
 /** Ordinary End User resources under the caller's authority. */
 export class EndUserClient {
   readonly #http: HttpClient;
   readonly #files: UserFiles;
+
+  static {
+    endUserHttpOf = (user) => user.#http;
+  }
 
   get files(): UserFiles {
     return this.#files;
@@ -122,3 +128,15 @@ export class EndUserClient {
     return this.session(id).refresh(options);
   }
 }
+
+/**
+ * The End User scope behind `user`, for the `gated` entry only. The root entry
+ * does not export it.
+ */
+export const endUserHttp = (user: unknown): HttpClient => {
+  if (!(user instanceof EndUserClient))
+    throw new TypeError(
+      "Expected an EndUserClient from organization.user(userId)",
+    );
+  return endUserHttpOf(user);
+};
