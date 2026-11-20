@@ -4612,6 +4612,8 @@
                   "publication_request_conflict",
                   "publication_snapshot_not_found",
                   "scheduler_not_found",
+                  "agent_not_found",
+                  "agent_preview_not_enabled",
                   "asr_disabled",
                   "asr_failed",
                   "turn_admission_closed",

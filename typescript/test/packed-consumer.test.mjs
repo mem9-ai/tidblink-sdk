@@ -445,6 +445,47 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
     void realtimeWorkflow;
     `,
   );
+  // Gated features have their own entry; the root entry's types stay as they are.
+  await writeFile(
+    path.join(temporary, "gated.ts"),
+    `import { OrganizationClient, TiDBLinkApiError, type Session, type SessionPage } from "@tidblink/server";
+    import { agents, FeatureNotEnabledError } from "@tidblink/server/gated";
+    import type { Agent, AgentPage, AgentSessionDefaults, GatedFeature } from "@tidblink/server/gated";
+    // @ts-expect-error Gated features are not exported from the root entry.
+    import { FeatureNotEnabledError as RootFeatureNotEnabledError, agents as rootAgents } from "@tidblink/server";
+    declare const organization: OrganizationClient;
+    async function agentWorkflow(): Promise<Session> {
+      const user = organization.user("user_1");
+      const sessionDefaults: AgentSessionDefaults = { templateId: "template_1", additionalInstructions: "Use metric units." };
+      try {
+        const agent: Agent = await agents(user).create({ name: "Support", sessionDefaults, idempotencyKey: "agent-1" });
+        const page: AgentPage = await agents(user).list({ limit: 10 });
+        // @ts-expect-error Listed Agents carry no ETag; get one to update it.
+        void page.agents[0]!.etag;
+        const updated: Agent = await agents(user).update(agent.agentId, { name: "Help" }, { ifMatch: agent.etag });
+        // @ts-expect-error An update needs the Agent's ETag.
+        await agents(user).update(agent.agentId, { name: "Help" }, {});
+        // @ts-expect-error The Agent supplies the Template.
+        await agents(user).createSession(agent.agentId, { idempotencyKey: "session-1", templateId: "template_2" });
+        const sessions: SessionPage = await agents(user).listSessions(agent.agentId);
+        void updated; void sessions;
+        // Without the Agent, the same settings create the same kind of Session.
+        await user.createSession({ ...agent.sessionDefaults, idempotencyKey: "session-2" });
+        return agents(user).createSession(agent.agentId, { idempotencyKey: "session-1", model: "model_1" });
+      } catch (error) {
+        if (error instanceof FeatureNotEnabledError) {
+          const feature: GatedFeature = error.feature;
+          const ordinary: TiDBLinkApiError = error;
+          void feature; void ordinary;
+        }
+        throw error;
+      }
+    }
+    // @ts-expect-error agents() takes the End User client, not the Organization client.
+    agents(organization);
+    void agentWorkflow; void RootFeatureNotEnabledError; void rootAgents;
+    `,
+  );
   const tsc = path.join(
     repositoryRoot,
     "node_modules",
@@ -467,6 +508,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       "--lib",
       "ES2023,DOM,DOM.Iterable",
       "consumer.ts",
+      "gated.ts",
     ],
     { cwd: temporary, encoding: "utf8", stdio: "pipe" },
   );
@@ -531,6 +573,10 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
     import assert from "node:assert/strict";
     import { createServer } from "node:http";
     import * as sdk from "@tidblink/server";
+    import * as gated from "@tidblink/server/gated";
+    assert.deepEqual(Object.keys(gated).sort(), ["Agents", "FeatureNotEnabledError", "agents"]);
+    assert(!("agents" in sdk) && !("FeatureNotEnabledError" in sdk));
+    assert(new gated.FeatureNotEnabledError({ status: 403, code: "x", message: "x", feature: "agents" }) instanceof sdk.TiDBLinkApiError);
     assert.equal(sdk.TIDB_LINK_API_VERSION, "0.0.1");
     assert.equal(sdk.TIDB_LINK_REVISION, ${JSON.stringify(installedPackage.tidbLinkRevision)});
     const { prepareRealtimeConnection } = await import("@tidblink/server/examples/prepare-realtime-connection.mjs");

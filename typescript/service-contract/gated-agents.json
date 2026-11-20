@@ -1,0 +1,2222 @@
+{
+  "revision": "3e920bc73c754dce4cbd5782811063da770be290",
+  "sourceOpenApiSha256": "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c",
+  "paths": {
+    "/api/v1/org/users/{userId}/agents": {
+      "post": {
+        "description": "Preview: available only to Organizations admitted to the Agent preview; others receive 403 agent_preview_not_enabled. This surface may change or be removed. An Agent is a named preset of Session creation settings owned by one active End User. The AgentTemplate must currently be selectable.\n\nAuthorization: OrganizationApiKey; persisted credentials determine Organization and End User scope.",
+        "operationId": "AgentAliasController_create",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAgentOpenApiDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created Agent. Repeating the key and body returns the Agent that key created, in its current state.",
+            "headers": {
+              "ETag": {
+                "description": "Opaque Agent revision token for If-Match.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponseOpenApiDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or Idempotency-Key is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A current Organization API Key is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth_kind_forbidden: an Organization API Key is required; agent_preview_not_enabled: the Organization is not admitted to the Agent preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "agent_not_found: the active ordinary End User is unavailable; agent_template_unavailable: the AgentTemplate is not selectable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "idempotency_key_reused: the key was used with another body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OrganizationApiKey": []
+          }
+        ],
+        "summary": "Create an Agent",
+        "tags": [
+          "Agents (Preview)"
+        ]
+      },
+      "get": {
+        "description": "Preview: available only to Organizations admitted to the Agent preview; others receive 403 agent_preview_not_enabled. This surface may change or be removed. Newest first.\n\nAuthorization: OrganizationApiKey; persisted credentials determine Organization and End User scope.",
+        "operationId": "AgentAliasController_list",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "Opaque continuation cursor bound to the End User.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentsResponseOpenApiDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query or cursor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A current Organization API Key is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth_kind_forbidden: an Organization API Key is required; agent_preview_not_enabled: the Organization is not admitted to the Agent preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "agent_not_found: the ordinary target End User or the Agent is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OrganizationApiKey": []
+          }
+        ],
+        "summary": "List an End User’s Agents",
+        "tags": [
+          "Agents (Preview)"
+        ]
+      }
+    },
+    "/api/v1/org/users/{userId}/agents/{agentId}": {
+      "get": {
+        "description": "Preview: available only to Organizations admitted to the Agent preview; others receive 403 agent_preview_not_enabled. This surface may change or be removed.\n\nAuthorization: OrganizationApiKey; persisted credentials determine Organization and End User scope.",
+        "operationId": "AgentAliasController_get",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "headers": {
+              "ETag": {
+                "description": "Opaque Agent revision token for If-Match.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponseOpenApiDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A current Organization API Key is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth_kind_forbidden: an Organization API Key is required; agent_preview_not_enabled: the Organization is not admitted to the Agent preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "agent_not_found: the ordinary target End User or the Agent is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OrganizationApiKey": []
+          }
+        ],
+        "summary": "Read an Agent",
+        "tags": [
+          "Agents (Preview)"
+        ]
+      },
+      "patch": {
+        "description": "Preview: available only to Organizations admitted to the Agent preview; others receive 403 agent_preview_not_enabled. This surface may change or be removed. Omitted fields keep their value; `sessionDefaults`, when present, replaces the stored defaults as a whole, so send them complete. Changes apply to Sessions created afterwards; existing Sessions keep their configuration. A changed AgentTemplate must currently be selectable.\n\nAuthorization: OrganizationApiKey; persisted credentials determine Organization and End User scope.",
+        "operationId": "AgentAliasController_update",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The Agent ETag.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAgentOpenApiDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "headers": {
+              "ETag": {
+                "description": "Opaque Agent revision token for If-Match.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponseOpenApiDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A current Organization API Key is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth_kind_forbidden: an Organization API Key is required; agent_preview_not_enabled: the Organization is not admitted to the Agent preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "agent_not_found: the active ordinary End User or the Agent is unavailable; agent_template_unavailable: the new AgentTemplate is not selectable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "precondition_failed: If-Match is stale.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "precondition_required: If-Match is missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OrganizationApiKey": []
+          }
+        ],
+        "summary": "Update an Agent",
+        "tags": [
+          "Agents (Preview)"
+        ]
+      },
+      "delete": {
+        "description": "Preview: available only to Organizations admitted to the Agent preview; others receive 403 agent_preview_not_enabled. This surface may change or be removed. Sessions created through the Agent remain ordinary Sessions. Deletion releases the Agent's creation Idempotency-Key.\n\nAuthorization: OrganizationApiKey; persisted credentials determine Organization and End User scope.",
+        "operationId": "AgentAliasController_remove",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "401": {
+            "description": "A current Organization API Key is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth_kind_forbidden: an Organization API Key is required; agent_preview_not_enabled: the Organization is not admitted to the Agent preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "agent_not_found: the ordinary target End User or the Agent is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OrganizationApiKey": []
+          }
+        ],
+        "summary": "Delete an Agent",
+        "tags": [
+          "Agents (Preview)"
+        ]
+      }
+    },
+    "/api/v1/org/users/{userId}/agents/{agentId}/sessions": {
+      "post": {
+        "description": "Preview: available only to Organizations admitted to the Agent preview; others receive 403 agent_preview_not_enabled. This surface may change or be removed. Resolves the Agent's Session defaults with this request's model, Realtime Model, Billing Tag and Client Tools, and creates an ordinary Session with them. The Idempotency-Key shares the namespace of ordinary Session creation: a retry returns the original Session even after the Agent changed, and repeating ordinary Session creation with the same key and the resolved body returns the same Session. Session creation refusals pass through unchanged and leave the key reusable.\n\nAuthorization: OrganizationApiKey; persisted credentials determine Organization and End User scope.",
+        "operationId": "AgentAliasSessionsController_create",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAgentSessionOpenApiDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created Session and the Agent it was created through.",
+            "headers": {
+              "ETag": {
+                "description": "The Session model ETag, as returned by ordinary Session creation.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionResponseOpenApiDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation_error: the body or Idempotency-Key is invalid, or the Agent Session defaults are no longer accepted by Session creation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A current Organization API Key is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth_kind_forbidden: an Organization API Key is required; agent_preview_not_enabled: the Organization is not admitted to the Agent preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "agent_not_found: the active ordinary End User or the Agent is unavailable; Session creation not-found refusals such as agent_template_unavailable pass through.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "session_creation_conflict: the key was used for another Agent, other choices or another Session creation; other Session creation conflicts pass through.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Session creation dependencies are temporarily unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OrganizationApiKey": []
+          }
+        ],
+        "summary": "Create a Session from an Agent",
+        "tags": [
+          "Agents (Preview)"
+        ]
+      },
+      "get": {
+        "description": "Preview: available only to Organizations admitted to the Agent preview; others receive 403 agent_preview_not_enabled. This surface may change or be removed. Newest first, in the ordinary Session list representation; deleted Sessions are omitted.\n\nAuthorization: OrganizationApiKey; persisted credentials determine Organization and End User scope.",
+        "operationId": "AgentAliasSessionsController_list",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "Opaque continuation cursor of the ordinary Session list, bound to the End User.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionsResponseOpenApiDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query or cursor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A current Organization API Key is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth_kind_forbidden: an Organization API Key is required; agent_preview_not_enabled: the Organization is not admitted to the Agent preview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "agent_not_found: the ordinary End User or the Agent is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OrganizationApiKey": []
+          }
+        ],
+        "summary": "List the Sessions created through an Agent",
+        "tags": [
+          "Agents (Preview)"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AgentResponseOpenApiDto": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "object",
+            "properties": {
+              "agentId": {
+                "type": "string"
+              },
+              "userId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "sessionDefaults": {
+                "description": "Ordinary Session creation settings without `tools`, stored exactly as accepted and returned as stored. Valid for Session creation when written.",
+                "type": "object",
+                "properties": {
+                  "agentTemplateId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                  },
+                  "realtimeModel": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "billingTag": {
+                    "nullable": true,
+                    "description": "One immutable Billing Tag snapshot for this resource. Null means untagged; request fields may be omitted only where the operation documents inheritance.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/BillingTag"
+                      }
+                    ]
+                  },
+                  "additionalInstructions": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "sandbox": {
+                    "type": "object",
+                    "properties": {
+                      "profileId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "nullable": true,
+                        "default": null
+                      },
+                      "workingDirectory": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": "^(?:\\.|(?![A-Za-z]:\\/)(?!\\.tidb-link(?:\\/|$))(?!\\s)(?!.*\\s$)(?!(?:.*\\/)?\\.{1,2}(?:\\/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:\\/[^/\\\\\\u0000-\\u001f\\u007f]+)*)$",
+                        "default": "."
+                      }
+                    }
+                  },
+                  "acknowledgeSessionRecall": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "agentTemplateId"
+                ]
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "agentId",
+              "userId",
+              "name",
+              "sessionDefaults",
+              "createdAt",
+              "updatedAt"
+            ]
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      },
+      "AgentSessionResponseOpenApiDto": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "session": {
+            "type": "object",
+            "properties": {
+              "organizationId": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string",
+                "nullable": true
+              },
+              "autoTitle": {
+                "type": "string",
+                "nullable": true
+              },
+              "ownerUserId": {
+                "type": "string"
+              },
+              "startedByUserId": {
+                "type": "string"
+              },
+              "createdByType": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "scheduler"
+                ]
+              },
+              "readOnly": {
+                "type": "boolean"
+              },
+              "sourceSchedulerId": {
+                "type": "string",
+                "nullable": true
+              },
+              "sourceSchedulerFireId": {
+                "type": "string",
+                "nullable": true
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+              },
+              "modelRevision": {
+                "type": "integer",
+                "minimum": 0,
+                "exclusiveMinimum": true
+              },
+              "realtimeModel": {
+                "description": "Selection for the next Realtime Connection; null uses the active release default.",
+                "type": "string",
+                "nullable": true
+              },
+              "realtimeModelRevision": {
+                "type": "integer",
+                "minimum": 0,
+                "exclusiveMinimum": true
+              },
+              "realtimeModelEtag": {
+                "description": "Opaque If-Match token for PATCH /api/v1/user/sessions/{id}/realtime-model; independent of the text model ETag.",
+                "type": "string"
+              },
+              "configurationEpoch": {
+                "description": "Current immutable Session Configuration Epoch; null for retained read-only or provider-owned snapshots outside the epoch model.",
+                "type": "integer",
+                "minimum": 1,
+                "exclusiveMinimum": false,
+                "nullable": true
+              },
+              "switching": {
+                "description": "True while a durable Session Template-switch command fences new interaction.",
+                "type": "boolean"
+              },
+              "template": {
+                "type": "object",
+                "properties": {
+                  "templateId": {
+                    "type": "string"
+                  },
+                  "contentDigest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "templateId",
+                  "contentDigest"
+                ],
+                "nullable": true
+              },
+              "modelPolicyStatus": {
+                "type": "string",
+                "enum": [
+                  "allowed",
+                  "organization_disallowed"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "deleted"
+                ]
+              },
+              "billingTag": {
+                "nullable": true,
+                "description": "One immutable Billing Tag snapshot for this resource. Null means untagged; request fields may be omitted only where the operation documents inheritance.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BillingTag"
+                  }
+                ]
+              },
+              "activeTurnId": {
+                "type": "string",
+                "nullable": true
+              },
+              "realtimeVoice": {
+                "description": "Fixed Session voice setting; null disables voice. This does not guarantee current provider availability.",
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string",
+                    "enum": [
+                      "zh-CN",
+                      "en-US"
+                    ]
+                  }
+                },
+                "required": [
+                  "language"
+                ],
+                "nullable": true
+              },
+              "realtime": {
+                "description": "The live Realtime connection of this Session, read when the response is produced; null when none is live or the Session is deleted.",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "description": "Realtime connection ID.",
+                    "type": "string"
+                  },
+                  "status": {
+                    "description": "connecting: admitted, but the realtime audio stream is not open yet. active: the stream is open and the user can speak, including while a task runs. paused: the stream is still open, but the current task is waiting for the user to answer a clarification question; answering resumes it.",
+                    "type": "string",
+                    "enum": [
+                      "connecting",
+                      "active",
+                      "paused"
+                    ]
+                  },
+                  "audio": {
+                    "type": "object",
+                    "properties": {
+                      "input": {
+                        "description": "One direction of the Realtime connection audio format.",
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "encoding": {
+                                "description": "Little-endian mono samples.",
+                                "type": "string",
+                                "enum": [
+                                  "pcm16"
+                                ]
+                              },
+                              "sampleRate": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true
+                              },
+                              "channels": {
+                                "type": "number",
+                                "minimum": 1,
+                                "maximum": 1
+                              }
+                            },
+                            "required": [
+                              "encoding",
+                              "sampleRate",
+                              "channels"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "encoding": {
+                                "description": "One Opus packet per audio frame, decoded at sampleRate.",
+                                "type": "string",
+                                "enum": [
+                                  "opus"
+                                ]
+                              },
+                              "sampleRate": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true
+                              },
+                              "channels": {
+                                "type": "number",
+                                "minimum": 1,
+                                "maximum": 1
+                              },
+                              "packetDurationMs": {
+                                "description": "Duration of each Opus packet.",
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true
+                              },
+                              "bitrate": {
+                                "description": "Output CBR in bps; absent on input and historical connections.",
+                                "oneOf": [
+                                  {
+                                    "type": "number",
+                                    "minimum": 16000,
+                                    "maximum": 16000
+                                  },
+                                  {
+                                    "type": "number",
+                                    "minimum": 24000,
+                                    "maximum": 24000
+                                  },
+                                  {
+                                    "type": "number",
+                                    "minimum": 32000,
+                                    "maximum": 32000
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "encoding",
+                              "sampleRate",
+                              "channels",
+                              "packetDurationMs"
+                            ]
+                          }
+                        ]
+                      },
+                      "output": {
+                        "description": "One direction of the Realtime connection audio format.",
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "encoding": {
+                                "description": "Little-endian mono samples.",
+                                "type": "string",
+                                "enum": [
+                                  "pcm16"
+                                ]
+                              },
+                              "sampleRate": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true
+                              },
+                              "channels": {
+                                "type": "number",
+                                "minimum": 1,
+                                "maximum": 1
+                              }
+                            },
+                            "required": [
+                              "encoding",
+                              "sampleRate",
+                              "channels"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "encoding": {
+                                "description": "One Opus packet per audio frame, decoded at sampleRate.",
+                                "type": "string",
+                                "enum": [
+                                  "opus"
+                                ]
+                              },
+                              "sampleRate": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true
+                              },
+                              "channels": {
+                                "type": "number",
+                                "minimum": 1,
+                                "maximum": 1
+                              },
+                              "packetDurationMs": {
+                                "description": "Duration of each Opus packet.",
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true
+                              },
+                              "bitrate": {
+                                "description": "Output CBR in bps; absent on input and historical connections.",
+                                "oneOf": [
+                                  {
+                                    "type": "number",
+                                    "minimum": 16000,
+                                    "maximum": 16000
+                                  },
+                                  {
+                                    "type": "number",
+                                    "minimum": 24000,
+                                    "maximum": 24000
+                                  },
+                                  {
+                                    "type": "number",
+                                    "minimum": 32000,
+                                    "maximum": 32000
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "encoding",
+                              "sampleRate",
+                              "channels",
+                              "packetDurationMs"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "input",
+                      "output"
+                    ]
+                  },
+                  "startedAt": {
+                    "description": "When the Realtime connection was admitted.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "status",
+                  "audio",
+                  "startedAt"
+                ],
+                "nullable": true
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "updatedAt": {
+                "type": "string"
+              },
+              "deletedAt": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "organizationId",
+              "sessionId",
+              "name",
+              "autoTitle",
+              "ownerUserId",
+              "startedByUserId",
+              "createdByType",
+              "readOnly",
+              "sourceSchedulerId",
+              "sourceSchedulerFireId",
+              "model",
+              "modelRevision",
+              "realtimeModel",
+              "realtimeModelRevision",
+              "realtimeModelEtag",
+              "configurationEpoch",
+              "switching",
+              "template",
+              "modelPolicyStatus",
+              "status",
+              "billingTag",
+              "activeTurnId",
+              "realtimeVoice",
+              "realtime",
+              "createdAt",
+              "updatedAt",
+              "deletedAt"
+            ]
+          }
+        },
+        "required": [
+          "agentId",
+          "session"
+        ]
+      },
+      "AgentsResponseOpenApiDto": {
+        "type": "object",
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "agentId": {
+                  "type": "string"
+                },
+                "userId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "sessionDefaults": {
+                  "description": "Ordinary Session creation settings without `tools`, stored exactly as accepted and returned as stored. Valid for Session creation when written.",
+                  "type": "object",
+                  "properties": {
+                    "agentTemplateId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "model": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                    },
+                    "realtimeModel": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "billingTag": {
+                      "nullable": true,
+                      "description": "One immutable Billing Tag snapshot for this resource. Null means untagged; request fields may be omitted only where the operation documents inheritance.",
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/BillingTag"
+                        }
+                      ]
+                    },
+                    "additionalInstructions": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "sandbox": {
+                      "type": "object",
+                      "properties": {
+                        "profileId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "nullable": true,
+                          "default": null
+                        },
+                        "workingDirectory": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^(?:\\.|(?![A-Za-z]:\\/)(?!\\.tidb-link(?:\\/|$))(?!\\s)(?!.*\\s$)(?!(?:.*\\/)?\\.{1,2}(?:\\/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:\\/[^/\\\\\\u0000-\\u001f\\u007f]+)*)$",
+                          "default": "."
+                        }
+                      }
+                    },
+                    "acknowledgeSessionRecall": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "agentTemplateId"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "agentId",
+                "userId",
+                "name",
+                "sessionDefaults",
+                "createdAt",
+                "updatedAt"
+              ]
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "agents",
+          "hasMore",
+          "nextCursor"
+        ]
+      },
+      "BillingTag": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "value"
+        ],
+        "description": "A non-secret attribution label. The pair is matched exactly and is not an authorization boundary.",
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_.-]{0,63}$",
+            "description": "Case-sensitive key: a lowercase ASCII letter followed by up to 63 lowercase ASCII letters, digits, underscores, dots, or hyphens."
+          },
+          "value": {
+            "type": "string",
+            "description": "Case-sensitive value normalized to NFC and limited to 1–128 bytes in UTF-8. Leading or trailing Unicode whitespace and Unicode control or format characters are rejected."
+          }
+        }
+      },
+      "CreateAgentOpenApiDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "sessionDefaults": {
+            "description": "Ordinary Session creation settings without `tools`, stored exactly as accepted and returned as stored. Valid for Session creation when written.",
+            "type": "object",
+            "properties": {
+              "agentTemplateId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+              },
+              "realtimeModel": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "billingTag": {
+                "nullable": true,
+                "description": "One immutable Billing Tag snapshot for this resource. Null means untagged; request fields may be omitted only where the operation documents inheritance.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BillingTag"
+                  }
+                ]
+              },
+              "additionalInstructions": {
+                "type": "string",
+                "nullable": true
+              },
+              "sandbox": {
+                "type": "object",
+                "properties": {
+                  "profileId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "nullable": true,
+                    "default": null
+                  },
+                  "workingDirectory": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^(?:\\.|(?![A-Za-z]:\\/)(?!\\.tidb-link(?:\\/|$))(?!\\s)(?!.*\\s$)(?!(?:.*\\/)?\\.{1,2}(?:\\/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:\\/[^/\\\\\\u0000-\\u001f\\u007f]+)*)$",
+                    "default": "."
+                  }
+                }
+              },
+              "acknowledgeSessionRecall": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "agentTemplateId"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "sessionDefaults"
+        ]
+      },
+      "CreateAgentSessionOpenApiDto": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+          },
+          "realtimeModel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "billingTag": {
+            "nullable": true,
+            "description": "One immutable Billing Tag snapshot for this resource. Null means untagged; request fields may be omitted only where the operation documents inheritance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BillingTag"
+              }
+            ]
+          },
+          "tools": {
+            "description": "Client Tools this Session client declares and executes; each client-started Turn uses the set current at its admission.",
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "function"
+                  ]
+                },
+                "name": {
+                  "description": "Client function name; platform tool names, the mcp_ prefix and double underscores are reserved.",
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_-]{1,64}$"
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "type",
+                "name",
+                "description",
+                "parameters"
+              ]
+            }
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "agent_instructions_too_large",
+                  "websocket_required",
+                  "binding_commit_unknown",
+                  "binding_receipt_integrity",
+                  "validation_error",
+                  "template_test_busy",
+                  "template_test_closed",
+                  "template_test_expired",
+                  "template_test_dependency_unavailable",
+                  "template_test_model_unavailable",
+                  "template_test_authority_lost",
+                  "invalid_organization_context",
+                  "authentication_required",
+                  "organization_owner_required",
+                  "organization_last_owner",
+                  "organization_already_joined",
+                  "resource_not_found",
+                  "invalid_cursor",
+                  "console_temporarily_unavailable",
+                  "service_configuration_unavailable",
+                  "human_principal_required",
+                  "user_api_key_required",
+                  "organization_membership_required",
+                  "admin_required",
+                  "org_admin_required",
+                  "agent_template_recall_acknowledgment_required",
+                  "agent_template_dependency_conflict",
+                  "agent_template_unavailable",
+                  "session_model_not_allowed",
+                  "session_execution_dependency_unavailable",
+                  "mcp_authorization_required",
+                  "mcp_oauth_unavailable",
+                  "mcp_oauth_confirmation_invalid",
+                  "mcp_authorization_mode_mismatch",
+                  "mcp_credential_rejected",
+                  "mcp_catalog_discovery_failed",
+                  "model_provider_unconfigured",
+                  "sandbox_unconfigured",
+                  "sandbox_validation_pending",
+                  "sandbox_scope_incompatible",
+                  "sandbox_configuration_incompatible",
+                  "sandbox_unavailable",
+                  "vision_model_unsupported",
+                  "vision_image_count_exceeded",
+                  "vision_image_unsupported",
+                  "vision_image_source_too_large",
+                  "vision_image_invalid",
+                  "vision_image_decode_limit_exceeded",
+                  "vision_image_payload_too_large",
+                  "vision_image_processing_unavailable",
+                  "session_not_found",
+                  "session_read_only",
+                  "session_switch_in_progress",
+                  "session_switch_busy",
+                  "session_switch_unsupported",
+                  "session_configuration_epoch_changed",
+                  "provider_unavailable",
+                  "realtime_connection_not_found",
+                  "realtime_connection_live",
+                  "realtime_model_conflict",
+                  "realtime_model_unavailable",
+                  "realtime_not_enabled",
+                  "realtime_language_unsupported",
+                  "realtime_language_unavailable",
+                  "realtime_connection_ended",
+                  "audio_format_unsupported",
+                  "admission_unavailable",
+                  "turn_not_found",
+                  "checkpoint_runtime_unavailable",
+                  "artifact_not_found",
+                  "chat_image_not_found",
+                  "artifact_cursor_invalid",
+                  "artifact_idempotency_conflict",
+                  "artifact_quota_exceeded",
+                  "artifact_not_writable",
+                  "artifact_revision_conflict",
+                  "artifact_source_not_found",
+                  "artifact_source_not_file",
+                  "artifact_source_changed",
+                  "artifact_storage_contract_unavailable",
+                  "artifact_publish_failed",
+                  "artifact_bytes_need_repair",
+                  "drive_file_not_found",
+                  "drive_path_too_long",
+                  "drive_download_rate_limited",
+                  "drive_download_provider_error",
+                  "drive_download_unavailable",
+                  "invalid_idempotency_key",
+                  "idempotency_key_required",
+                  "session_creation_conflict",
+                  "interaction_input_conflict",
+                  "interaction_not_found",
+                  "interaction_admission_closed",
+                  "interaction_target_conflict",
+                  "client_tool_call_unavailable",
+                  "client_tool_call_settled",
+                  "idempotency_key_reused",
+                  "identity_conversion_command_retired",
+                  "idempotency_in_progress",
+                  "idempotency_key_expired",
+                  "secret_delivery_expired",
+                  "idempotency_completion_failed",
+                  "idempotency_witness_invalid",
+                  "skill_name_conflict",
+                  "skill_delete_blocked",
+                  "mcp_server_delete_blocked",
+                  "mcp_server_name_conflict",
+                  "mcp_server_version_conflict",
+                  "invalid_skill_package",
+                  "skill_ingestion_not_found",
+                  "skill_import_job_not_found",
+                  "skill_import_state_conflict",
+                  "skill_ingestion_expired",
+                  "precondition_required",
+                  "precondition_failed",
+                  "resource_conflict",
+                  "agent_template_profile_unavailable",
+                  "agent_template_dependency_unavailable",
+                  "agent_template_archived",
+                  "agent_template_conflict",
+                  "agent_template_list_changed",
+                  "skill_not_found",
+                  "skill_version_not_found",
+                  "skill_file_not_found",
+                  "skill_package_file_rejected",
+                  "skill_package_store_unavailable",
+                  "skill_already_installed",
+                  "skill_installation_not_found",
+                  "skill_upgrade_not_forward",
+                  "unsupported_media_type",
+                  "raw_upload_too_large",
+                  "upload_too_large",
+                  "upload_ticket_invalid",
+                  "upload_failed",
+                  "upload_expired",
+                  "upload_incomplete",
+                  "upload_integrity_failed",
+                  "upload_requires_multipart",
+                  "upload_temporarily_unavailable",
+                  "skill_authoring_forbidden",
+                  "skill_read_forbidden",
+                  "restore_requires_historical_version",
+                  "private_skill_required",
+                  "publication_head_required",
+                  "open_publication_request_exists",
+                  "publication_target_changed",
+                  "publication_conflict",
+                  "publication_request_not_found",
+                  "publication_request_already_decided",
+                  "publication_request_invalidated",
+                  "publication_request_conflict",
+                  "publication_snapshot_not_found",
+                  "scheduler_not_found",
+                  "agent_not_found",
+                  "agent_preview_not_enabled",
+                  "asr_disabled",
+                  "asr_failed",
+                  "turn_admission_closed",
+                  "session_has_active_turn",
+                  "clarification_source_conflict",
+                  "configuration_unavailable",
+                  "organization_api_key_rotation_conflict",
+                  "auth_kind_forbidden",
+                  "billing_target_not_found",
+                  "invalid_billing_usage_query",
+                  "invalid_billing_usage_cursor",
+                  "billing_audit_unavailable",
+                  "session_observation_audit_unavailable",
+                  "drive9_provision_config_conflict",
+                  "runtime_error",
+                  "invalid_credentials",
+                  "invalid_current_password",
+                  "account_already_exists",
+                  "account_not_found",
+                  "password_already_configured",
+                  "google_identity_already_linked",
+                  "verification_not_found",
+                  "verification_code_invalid",
+                  "verification_replaced",
+                  "verification_already_completed",
+                  "verification_expired",
+                  "verification_attempts_exhausted",
+                  "verification_rate_limited",
+                  "login_rate_limited",
+                  "password_rate_limited",
+                  "auth_temporarily_unavailable",
+                  "auth_outcome_unknown",
+                  "password_changed",
+                  "invalid_origin",
+                  "platform_operator_required",
+                  "personal_organization_eligibility_concurrent_change",
+                  "personal_organization_eligibility_unavailable",
+                  "personal_organization_eligibility_outcome_unknown",
+                  "personal_organization_creation_unavailable",
+                  "onboarding_temporarily_unavailable",
+                  "onboarding_outcome_unknown",
+                  "organization_destination_not_available",
+                  "invitation_not_available",
+                  "invitation_not_actionable",
+                  "invite_delivery_failed",
+                  "access_request_not_available",
+                  "access_requests_unavailable"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "nullable": true
+              }
+            }
+          }
+        }
+      },
+      "SessionsResponseOpenApiDto": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "organizationId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "autoTitle": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "ownerUserId": {
+                  "type": "string"
+                },
+                "startedByUserId": {
+                  "type": "string"
+                },
+                "createdByType": {
+                  "type": "string",
+                  "enum": [
+                    "user",
+                    "scheduler"
+                  ]
+                },
+                "readOnly": {
+                  "type": "boolean"
+                },
+                "sourceSchedulerId": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "sourceSchedulerFireId": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                },
+                "modelRevision": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "exclusiveMinimum": true
+                },
+                "realtimeModel": {
+                  "description": "Selection for the next Realtime Connection; null uses the active release default.",
+                  "type": "string",
+                  "nullable": true
+                },
+                "realtimeModelRevision": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "exclusiveMinimum": true
+                },
+                "realtimeModelEtag": {
+                  "description": "Opaque If-Match token for PATCH /api/v1/user/sessions/{id}/realtime-model; independent of the text model ETag.",
+                  "type": "string"
+                },
+                "configurationEpoch": {
+                  "description": "Current immutable Session Configuration Epoch; null for retained read-only or provider-owned snapshots outside the epoch model.",
+                  "type": "integer",
+                  "minimum": 1,
+                  "exclusiveMinimum": false,
+                  "nullable": true
+                },
+                "switching": {
+                  "description": "True while a durable Session Template-switch command fences new interaction.",
+                  "type": "boolean"
+                },
+                "template": {
+                  "type": "object",
+                  "properties": {
+                    "templateId": {
+                      "type": "string"
+                    },
+                    "contentDigest": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "templateId",
+                    "contentDigest"
+                  ],
+                  "nullable": true
+                },
+                "modelPolicyStatus": {
+                  "type": "string",
+                  "enum": [
+                    "allowed",
+                    "organization_disallowed"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "deleted"
+                  ]
+                },
+                "billingTag": {
+                  "nullable": true,
+                  "description": "One immutable Billing Tag snapshot for this resource. Null means untagged; request fields may be omitted only where the operation documents inheritance.",
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/BillingTag"
+                    }
+                  ]
+                },
+                "activeTurnId": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "realtimeVoice": {
+                  "description": "Fixed Session voice setting; null disables voice. This does not guarantee current provider availability.",
+                  "type": "object",
+                  "properties": {
+                    "language": {
+                      "type": "string",
+                      "enum": [
+                        "zh-CN",
+                        "en-US"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "language"
+                  ],
+                  "nullable": true
+                },
+                "realtime": {
+                  "description": "The live Realtime connection of this Session, read when the response is produced; null when none is live or the Session is deleted.",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "Realtime connection ID.",
+                      "type": "string"
+                    },
+                    "status": {
+                      "description": "connecting: admitted, but the realtime audio stream is not open yet. active: the stream is open and the user can speak, including while a task runs. paused: the stream is still open, but the current task is waiting for the user to answer a clarification question; answering resumes it.",
+                      "type": "string",
+                      "enum": [
+                        "connecting",
+                        "active",
+                        "paused"
+                      ]
+                    },
+                    "audio": {
+                      "type": "object",
+                      "properties": {
+                        "input": {
+                          "description": "One direction of the Realtime connection audio format.",
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "encoding": {
+                                  "description": "Little-endian mono samples.",
+                                  "type": "string",
+                                  "enum": [
+                                    "pcm16"
+                                  ]
+                                },
+                                "sampleRate": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "exclusiveMinimum": true
+                                },
+                                "channels": {
+                                  "type": "number",
+                                  "minimum": 1,
+                                  "maximum": 1
+                                }
+                              },
+                              "required": [
+                                "encoding",
+                                "sampleRate",
+                                "channels"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "encoding": {
+                                  "description": "One Opus packet per audio frame, decoded at sampleRate.",
+                                  "type": "string",
+                                  "enum": [
+                                    "opus"
+                                  ]
+                                },
+                                "sampleRate": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "exclusiveMinimum": true
+                                },
+                                "channels": {
+                                  "type": "number",
+                                  "minimum": 1,
+                                  "maximum": 1
+                                },
+                                "packetDurationMs": {
+                                  "description": "Duration of each Opus packet.",
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "exclusiveMinimum": true
+                                },
+                                "bitrate": {
+                                  "description": "Output CBR in bps; absent on input and historical connections.",
+                                  "oneOf": [
+                                    {
+                                      "type": "number",
+                                      "minimum": 16000,
+                                      "maximum": 16000
+                                    },
+                                    {
+                                      "type": "number",
+                                      "minimum": 24000,
+                                      "maximum": 24000
+                                    },
+                                    {
+                                      "type": "number",
+                                      "minimum": 32000,
+                                      "maximum": 32000
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "encoding",
+                                "sampleRate",
+                                "channels",
+                                "packetDurationMs"
+                              ]
+                            }
+                          ]
+                        },
+                        "output": {
+                          "description": "One direction of the Realtime connection audio format.",
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "encoding": {
+                                  "description": "Little-endian mono samples.",
+                                  "type": "string",
+                                  "enum": [
+                                    "pcm16"
+                                  ]
+                                },
+                                "sampleRate": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "exclusiveMinimum": true
+                                },
+                                "channels": {
+                                  "type": "number",
+                                  "minimum": 1,
+                                  "maximum": 1
+                                }
+                              },
+                              "required": [
+                                "encoding",
+                                "sampleRate",
+                                "channels"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "encoding": {
+                                  "description": "One Opus packet per audio frame, decoded at sampleRate.",
+                                  "type": "string",
+                                  "enum": [
+                                    "opus"
+                                  ]
+                                },
+                                "sampleRate": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "exclusiveMinimum": true
+                                },
+                                "channels": {
+                                  "type": "number",
+                                  "minimum": 1,
+                                  "maximum": 1
+                                },
+                                "packetDurationMs": {
+                                  "description": "Duration of each Opus packet.",
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "exclusiveMinimum": true
+                                },
+                                "bitrate": {
+                                  "description": "Output CBR in bps; absent on input and historical connections.",
+                                  "oneOf": [
+                                    {
+                                      "type": "number",
+                                      "minimum": 16000,
+                                      "maximum": 16000
+                                    },
+                                    {
+                                      "type": "number",
+                                      "minimum": 24000,
+                                      "maximum": 24000
+                                    },
+                                    {
+                                      "type": "number",
+                                      "minimum": 32000,
+                                      "maximum": 32000
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "encoding",
+                                "sampleRate",
+                                "channels",
+                                "packetDurationMs"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "input",
+                        "output"
+                      ]
+                    },
+                    "startedAt": {
+                      "description": "When the Realtime connection was admitted.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "status",
+                    "audio",
+                    "startedAt"
+                  ],
+                  "nullable": true
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "deletedAt": {
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              "required": [
+                "organizationId",
+                "sessionId",
+                "name",
+                "autoTitle",
+                "ownerUserId",
+                "startedByUserId",
+                "createdByType",
+                "readOnly",
+                "sourceSchedulerId",
+                "sourceSchedulerFireId",
+                "model",
+                "modelRevision",
+                "realtimeModel",
+                "realtimeModelRevision",
+                "realtimeModelEtag",
+                "configurationEpoch",
+                "switching",
+                "template",
+                "modelPolicyStatus",
+                "status",
+                "billingTag",
+                "activeTurnId",
+                "realtimeVoice",
+                "realtime",
+                "createdAt",
+                "updatedAt",
+                "deletedAt"
+              ]
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "sessions",
+          "hasMore",
+          "nextCursor"
+        ]
+      },
+      "UpdateAgentOpenApiDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "sessionDefaults": {
+            "description": "Ordinary Session creation settings without `tools`, stored exactly as accepted and returned as stored. Valid for Session creation when written.",
+            "type": "object",
+            "properties": {
+              "agentTemplateId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+              },
+              "realtimeModel": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "billingTag": {
+                "nullable": true,
+                "description": "One immutable Billing Tag snapshot for this resource. Null means untagged; request fields may be omitted only where the operation documents inheritance.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BillingTag"
+                  }
+                ]
+              },
+              "additionalInstructions": {
+                "type": "string",
+                "nullable": true
+              },
+              "sandbox": {
+                "type": "object",
+                "properties": {
+                  "profileId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "nullable": true,
+                    "default": null
+                  },
+                  "workingDirectory": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^(?:\\.|(?![A-Za-z]:\\/)(?!\\.tidb-link(?:\\/|$))(?!\\s)(?!.*\\s$)(?!(?:.*\\/)?\\.{1,2}(?:\\/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:\\/[^/\\\\\\u0000-\\u001f\\u007f]+)*)$",
+                    "default": "."
+                  }
+                }
+              },
+              "acknowledgeSessionRecall": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "agentTemplateId"
+            ]
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "OrganizationApiKey": {
+        "scheme": "bearer",
+        "bearerFormat": "opaque",
+        "type": "http",
+        "description": "Opaque ti_org_<id>_<secret> credential: ASCII alphanumeric id body (1–64), unpadded base64url secret (43 characters from 32 random bytes). Authenticates an Organization machine principal with no acting User. Each handler explicitly chooses whether to admit this principal kind."
+      }
+    }
+  }
+}

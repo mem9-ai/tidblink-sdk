@@ -110,6 +110,14 @@ const snapshots = {
     paths: [`${session}/turns/audio`],
     schemas: ["TurnStreamEvent"],
   },
+  // Gated: only Organizations the service admits may call these routes.
+  "gated-agents.json": {
+    paths: [
+      `${user}/agents`,
+      `${user}/agents/{agentId}`,
+      `${user}/agents/{agentId}/sessions`,
+    ],
+  },
 };
 
 for (const [name, selection] of Object.entries(snapshots)) {

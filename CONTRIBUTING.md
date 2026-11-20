@@ -45,6 +45,36 @@ of `CHANGELOG.md`. Releases follow [RELEASING.md](RELEASING.md).
 Open an issue before adding a new product area. The SDK intentionally exposes a
 narrow supported surface rather than every TiDB Link route.
 
+## Gated features
+
+A feature TiDB Link enables only for some Organizations, such as Agents, lives
+under `typescript/src/gated/`, one file per feature, and is exported from the
+`@tidblink/server/gated` entry only. Keep it removable:
+
+- Gated code may import the root modules; root modules never import gated
+  ones. A root module that a gated feature needs exposes an internal function
+  that `src/index.ts` does not export, like `endUserHttp` in `src/user.ts`.
+  `test/gated-agents.test.mjs` checks that the root entry neither exports nor
+  imports the gated entry. In Python the gated code is `tidblink_server.gated`,
+  which `tidblink_server` does not import; `tests/test_gated_agents.py` checks
+  the same.
+- Gated features take the stable client, as in `agents(user)`, and return the
+  root types, such as an ordinary `Session`; they add no methods to root
+  classes.
+- The service's refusal code for each feature appears only in
+  `src/gated/errors.ts`, which maps it to `FeatureNotEnabledError`.
+- Each feature has its own frozen contract (`service-contract/gated-<feature>.json`,
+  registered in `scripts/refresh-contract.mjs`) and its own service fixture
+  under `typescript/test/service/gated/`, which enables one Organization and
+  leaves another not enabled.
+
+To remove a feature, delete in one change its file under `src/gated/` and its
+line in `src/gated/index.ts`, its refusal code in `src/gated/errors.ts`, its
+contract snapshot, contract test and registration, its unit tests, service
+cases and the parts of the packed-consumer test that use it, its README
+subsection and its Python counterpart. Keep the `gated` entry and
+`FeatureNotEnabledError` for the next feature.
+
 ## Python SDK
 
 The Python SDK in `python/` follows the TypeScript SDK: the same supported

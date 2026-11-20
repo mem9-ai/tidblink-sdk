@@ -13,11 +13,13 @@ text submission, steering, cancellation, checkpoint retry, original-result waiti
 continuous progress, Client Tools, Session connections over Backend Connections,
 conversation history, file attachments,
 Realtime Model/Connection preparation, prerecorded audio and User usage reads for [service revision
-201c30fb](https://github.com/mem9-ai/agent-stack/commit/201c30fb737c29db929880b2f1f06e54fd247a44).
+3e920bc7](https://github.com/mem9-ai/agent-stack/commit/3e920bc73c754dce4cbd5782811063da770be290).
 
 Text commands return durable receipts independently of execution. Waiting reads the
-original command's outcome. The service has no Agent: a Session is created
-directly from an explicit Template, and there is no default Template. Browser, MSP, Console and device APIs are
+original command's outcome. A Session is created directly from an explicit
+Template, and there is no default Template; Agents, named presets of Session
+creation settings, are a [gated feature](#gated-features) available only to
+enabled Organizations. Browser, MSP, Console and device APIs are
 outside this package. Every resource workflow uses an Organization API Key with
 an explicitly selected End User; User API Keys are not supported.
 
@@ -423,7 +425,7 @@ The Handoff Turn summarizes the Session so far for the target Template. History
 reads return it as a Turn with `kind: "template_handoff"`, no `userMessage` and
 an empty `userMessages`; when it succeeds, its assistant Message is the summary.
 The service's
-[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/201c30fb737c29db929880b2f1f06e54fd247a44/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
+[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/3e920bc73c754dce4cbd5782811063da770be290/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
 describes what the Session keeps across a switch (models, Billing Tag, Client
 Tools and creation options) and that cancelling the Handoff Turn fails the
 switch.
@@ -1181,6 +1183,82 @@ The installed example `@tidblink/server/examples/read-usage.mjs` exports
 `TAG_KEY`/`TAG_VALUE` are optional. It performs reads only and does not claim that
 a first detail page is complete history.
 
+## Gated features
+
+TiDB Link enables some features only for particular Organizations. The SDK
+offers them from a separate entry, `@tidblink/server/gated`; the root entry
+does not export them. A gated feature may change or be removed in any release,
+without a deprecation period, and is outside the stability promise of 1.0.
+
+An Organization that is not enabled for a feature receives
+`FeatureNotEnabledError` from every call to it. It is a `TiDBLinkApiError` with
+the service's `status` (403), `code` and `requestId`, plus `feature`, the name
+of the feature. Nothing is created, and the same call succeeds once the
+Organization is enabled. There is no separate check; call
+`agents(user).list({ limit: 1 })` to find out at startup.
+
+### Agents
+
+An Agent is an End User's named preset of Session creation settings. Creating
+a Session through it creates an ordinary Session: from then on use the
+ordinary `Session` methods, and nothing on the Session, its Turns, events or
+usage names the Agent.
+
+```ts
+import { agents, FeatureNotEnabledError } from "@tidblink/server/gated";
+
+const user = organization.user(userId);
+const agent = await agents(user).create({
+  name: "Support",
+  sessionDefaults: {
+    templateId,
+    additionalInstructions: "Use metric units.",
+    billingTag: { key: "agent", value: "support" },
+  },
+  idempotencyKey: agentKey,
+});
+const session = await agents(user).createSession(agent.agentId, {
+  idempotencyKey: sessionKey,
+});
+// An ordinary Session from here on.
+```
+
+`agents(user)` takes the End User client from `organization.user(userId)` and
+sends no request. Its methods:
+
+| Method | Does |
+|---|---|
+| `create({ name, sessionDefaults, idempotencyKey })` | Repeating the key and input returns the Agent that key created. The Template must be selectable. |
+| `list({ limit, cursor })` | Newest first. Listed Agents carry no `etag`. |
+| `get(agentId)` | Returns the Agent with its `etag`. |
+| `update(agentId, { name?, sessionDefaults? }, { ifMatch })` | `sessionDefaults` replaces the stored defaults as a whole. A stale `ifMatch` is `ConflictError` (`precondition_failed`). |
+| `delete(agentId)` | Sessions created through the Agent remain. |
+| `createSession(agentId, { idempotencyKey, model?, realtimeModel?, billingTag?, tools? })` | Returns a `Session`. The choices apply over the Agent's defaults. |
+| `listSessions(agentId, { limit, cursor })` | The Sessions created through the Agent that still exist, as a `SessionPage`. |
+
+`sessionDefaults` are the `createSession` options without `idempotencyKey`,
+`tools` and request options. The SDK checks the Template ID, creation keys and
+`ifMatch` locally; the service checks the rest, and Session creation checks
+the defaults again each time, so a Template that is no longer selectable
+refuses Session creation, not the Agent read.
+
+Session creation keys share the namespace of `user.createSession`. A retry with
+the same key and choices returns the original Session even after the Agent
+changed; other choices or another Agent under that key are `ConflictError`
+(`session_creation_conflict`). A refusal from Session creation is returned
+unchanged and leaves the key reusable. Another End User's Agent, or one that
+was deleted, is `agent_not_found`.
+
+Edits apply to Sessions created afterwards. To read an Agent's usage, give it
+a Billing Tag and filter [User usage](#user-usage) by its `tagKey` and
+`tagValue`. To stop using
+Agents, pass an Agent's defaults to ordinary Session creation; with the same
+key it returns the Session the Agent created:
+
+```ts
+await user.createSession({ ...agent.sessionDefaults, idempotencyKey: sessionKey });
+```
+
 ## Compatibility and verification
 
 `TIDB_LINK_REVISION` / `tidbLinkRevision` identify the selected exact service
@@ -1200,7 +1278,7 @@ packed artifact in a clean ESM TypeScript consumer. To verify the packed SDK and
 its examples against the real service, use the service's Node.js 26 runtime, install its
 pinned dependencies, generate Prisma, build its Hardware contract and prepare its
 current schema in a **dedicated test database**. See the selected service's
-[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/201c30fb737c29db929880b2f1f06e54fd247a44/docs/prisma-first-tidb-validation-and-rollout.md).
+[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/3e920bc73c754dce4cbd5782811063da770be290/docs/prisma-first-tidb-validation-and-rollout.md).
 
 ```sh
 AGENT_SERVICE_ROOT=/path/to/agent-stack \
@@ -1265,9 +1343,15 @@ They cover recorded input, malformed/unsupported recordings, supplier refusals,
 model failure, active-response interruption and the installed audio example.
 The public Session projection exposes the frozen Template digest but hides the
 stored creation options. Those snapshots and active-Turn model freezing also rely
-on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/201c30fb737c29db929880b2f1f06e54fd247a44/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
+on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/3e920bc73c754dce4cbd5782811063da770be290/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
 prove those hidden values.
 Usage cases seed controlled facts and verify both public projections, exact filters,
 paging and authority without executing messages to manufacture billing data.
+Gated Agent cases use their own fixture, which enables one Organization through
+the service's Ops Feature Admission and leaves another not enabled. They verify
+the refusal of every Agent call in the Organization that is not enabled, Agent
+creation replay, reads, paging, ETag updates, deletion and owner isolation, and
+that a Session created through an Agent is an ordinary Session and the same
+Session that ordinary creation returns for the Agent's defaults and key.
 No production supplier credentials or WebSocket redemption are needed. A
 mismatch or unavailable service fails this check instead of silently skipping it.
