@@ -2,11 +2,16 @@
 
 ## Unreleased
 
-- Align with service
-  [3e920bc7](https://github.com/mem9-ai/agent-stack/commit/3e920bc73c754dce4cbd5782811063da770be290),
-  OpenAPI SHA-256
-  `cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c`. The
-  frozen OpenAPI subsets change only by the error codes `agent_not_found` and
+## 0.5.1
+
+Stable release on the `latest` dist-tag for service
+[3e920bc7](https://github.com/mem9-ai/agent-stack/commit/3e920bc73c754dce4cbd5782811063da770be290),
+OpenAPI SHA-256
+`cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c`, which is
+deployed to production. It only adds to 0.5.0.
+
+- Align with service `3e920bc7` instead of `201c30fb`. The frozen OpenAPI
+  subsets change only by the error codes `agent_not_found` and
   `agent_preview_not_enabled`; the Backend Connection protocol is unchanged.
 
 ### Gated features
