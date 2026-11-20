@@ -10,7 +10,7 @@ not ship it to browsers or devices.
 
 It follows the [TypeScript SDK](../typescript/README.md): the same supported
 scope, behaviour, errors and recovery rules, for the same exact service
-revision ([201c30fb](https://github.com/mem9-ai/agent-stack/commit/201c30fb737c29db929880b2f1f06e54fd247a44)).
+revision ([3e920bc7](https://github.com/mem9-ai/agent-stack/commit/3e920bc73c754dce4cbd5782811063da770be290)).
 The TypeScript README is the reference for what each capability does and how to
 recover from an uncertain outcome; this README covers how that surface looks in
 Python.
@@ -306,7 +306,39 @@ end = await orders.closed  # ServedConnectorEnd(reason="closed")
 [`examples/serve_connector.py`](examples/serve_connector.py) serves an `orders`
 Connector from your own order data.
 
-## Examples
+## Gated features
+
+Features TiDB Link enables only for some Organizations live in
+`tidblink_server.gated`, which `tidblink_server` neither imports nor
+re-exports. They may change or be removed in any release; see the TypeScript
+README's [Gated features](../typescript/README.md#gated-features) for what each
+does. An Organization that is not enabled receives `FeatureNotEnabledError`, a
+`TiDBLinkApiError` with `feature`, from every call.
+
+### Agents
+
+```python
+from tidblink_server.gated import FeatureNotEnabledError, agents
+
+user = organization.user(user_id)
+agent = await agents(user).create(
+    name="Support",
+    session_defaults={"template_id": template_id, "additional_instructions": "Use metric units."},
+    idempotency_key=agent_key,
+)
+session = await agents(user).create_session(agent["agentId"], idempotency_key=session_key)
+```
+
+The methods are `create`, `list`, `get`, `update(agent_id, if_match=..., name=...,
+session_defaults=...)`, `delete`, `create_session` and `list_sessions`. Agents
+are dictionaries with the service's field names, except that the keys of
+`sessionDefaults` are `create_session`'s keyword arguments, so the same settings
+create a Session without the Agent:
+
+```python
+await user.create_session(**agent["sessionDefaults"], idempotency_key=session_key)
+```
+
 
 [`examples/`](examples) holds the scenarios indexed in
 [`../examples/README.md`](../examples/README.md). Each exports an async workflow

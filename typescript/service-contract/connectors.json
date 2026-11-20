@@ -1,6 +1,6 @@
 {
-  "revision": "201c30fb737c29db929880b2f1f06e54fd247a44",
-  "sourceOpenApiSha256": "74215cefcabb18e915fa6a13d4a4dbcbd3720aa1eb5b522e0fd3e83d2b6ad131",
+  "revision": "3e920bc73c754dce4cbd5782811063da770be290",
+  "sourceOpenApiSha256": "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c",
   "paths": {
     "/api/v1/org/connectors": {
       "get": {
@@ -352,6 +352,8 @@
                   "publication_request_conflict",
                   "publication_snapshot_not_found",
                   "scheduler_not_found",
+                  "agent_not_found",
+                  "agent_preview_not_enabled",
                   "asr_disabled",
                   "asr_failed",
                   "turn_admission_closed",

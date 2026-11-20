@@ -22,6 +22,13 @@ until the public TiDB Link HTTP contract is declared stable.
 
 Consumers pin an exact version and upgrade through their own change.
 
+Exports of the `@tidblink/server/gated` entry are features TiDB Link enables
+only for some Organizations. They are outside the stability promise, including
+after `1.0`: a release that aligns with a service that changed or removed a
+gated feature changes or removes its export in the same release, without a
+deprecation period. Name such a change in the changelog's Gated features
+subsection.
+
 ## Branches
 
 `main` is the development branch. Nothing is released from it, whatever its
