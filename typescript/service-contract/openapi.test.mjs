@@ -194,13 +194,17 @@ test("history pages preserve Full Agent and Realtime projections", () => {
 });
 
 test("a failed File Notification's Operation says why in Turn reads", () => {
-  const turns = properties(schema("TurnsResponseOpenApiDto")).turns.items.oneOf;
-  const handoff = properties(schema("TemplateHandoffTurn"));
-  for (const operations of [
-    ...turns.map((variant) => properties(variant).operations),
-    handoff.operations,
-  ]) {
-    const operation = operations.items;
+  const resolve = (value) =>
+    value.$ref ? schema(value.$ref.split("/").at(-1)) : value;
+  // The exact Turn read answers a UserInputTurn or a TemplateHandoffTurn.
+  const read = resolve(
+    document.paths[`${sessionPath}/turns/{turnId}`].get.responses["200"]
+      .content["application/json"].schema,
+  );
+  const exact = resolve(read.properties.turn).oneOf.map(resolve);
+  const listed = properties(schema("TurnsResponseOpenApiDto")).turns.items.oneOf;
+  for (const turn of [...exact, ...listed]) {
+    const operation = resolve(properties(turn).operations.items);
     assert(!operation.required.includes("fileRefusal"));
     const refusal = operation.properties.fileRefusal;
     assert.deepEqual(refusal.required, ["reason"]);
@@ -208,6 +212,8 @@ test("a failed File Notification's Operation says why in Turn reads", () => {
     assert.equal(refusal.properties.reason.type, "string");
     assert(refusal.properties.reason.enum.includes("local_only"));
     assert.equal(refusal.properties.path.type, "string");
+    // A succeeded one points at the file it announced.
+    assert.match(operation.properties.resultPointer.description, /file_notification/);
   }
 });
 

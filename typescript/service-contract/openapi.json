@@ -5334,7 +5334,41 @@
           "output": {
             "description": "Hardware Client Tool Operations omit output in every status. Kind-specific result. An llm.complete Operation exposes usage as token counts only: input, output, cacheRead, cacheWrite, totalTokens, and optional cacheWrite1h and reasoning. Counts that are unavailable or invalid are omitted; absent usage is omitted. Supplier SDK cost is not exposed. Customer fees are available from the Billing usage APIs. A failed or interrupted llm.complete Operation has error {code, message, details?} with fixed text only; model_provider_failed carries details.provider (category, (category, httpStatus, errorType, errorCode); other failures use runtime_error or a ledger outcome code. Any other failed, interrupted or unknown_result Operation with an error, including tool Operations, has error {code, message, details} with fixed text naming only the tool: an intentional tool code (for example mcp_unavailable or validation_error) is kept; an allow-listed web_search_* or session_recall_* reason becomes the code and is repeated as details.code with a boolean details.retryable; anything else reads tool_failed. A memory.recall Operation keeps only memory_recall_failed, turn_interrupted or operation_result_unknown, and otherwise reads tool_failed. details also carries tool, category (rejected, unavailable, remote_error, failed, unknown_result, interrupted or unexpected) and, when known, dispatch and retryContract."
           },
+          "fileRefusal": {
+            "description": "Present only on a failed file.notify Operation (a File Notification the Agent could not make): why it announced nothing, and the path the Agent tried. The same reason its operation_step event carries as fileRefusal. reason is one of not_found, directory, local_only (a folder such as build/ or node_modules/ that the sandbox keeps to itself and never saves to the Session's Drive), uploads, reserved, skills, invalid_path, path_too_long, invalid_arguments, limit_reached, drain_failed (the sandbox could not save its pending writes) or unavailable; new reasons may be added.",
+            "type": "object",
+            "properties": {
+              "reason": {
+                "description": "Why the Agent could not announce the file.",
+                "type": "string",
+                "enum": [
+                  "not_found",
+                  "directory",
+                  "local_only",
+                  "uploads",
+                  "reserved",
+                  "skills",
+                  "invalid_path",
+                  "path_too_long",
+                  "invalid_arguments",
+                  "limit_reached",
+                  "drain_failed",
+                  "unavailable"
+                ]
+              },
+              "path": {
+                "description": "The path the Agent tried: relative to the Session's Drive root when it resolves inside it, otherwise as the Agent gave it. Absent when the Agent gave no usable path.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
           "resultPointer": {
+            "description": "Reference to the Operation result. A succeeded file.notify Operation (a File Notification) has { kind: \"file_notification\", path, name, version, byteSize, updatedAt }: the file it announced in the Session's Drive, the same reference its operation_step event carries as file.",
             "type": "object",
             "additionalProperties": true
           },

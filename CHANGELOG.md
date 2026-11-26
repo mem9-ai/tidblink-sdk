@@ -3,9 +3,9 @@
 ## Unreleased
 
 - Align with service
-  [29506fe5](https://github.com/mem9-ai/agent-stack/commit/29506fe56f9b0de17da5ac26a50b22a9662f1acb),
+  [eb3a04d0](https://github.com/mem9-ai/agent-stack/commit/eb3a04d0c23d64f65cb80d9cbef80c332c7c080a),
   OpenAPI SHA-256
-  `382d7109176cd2b9d6f7210e06948f67699d00b2aae15970917996383e4a4323`, which
+  `73ecab7576483c43c65a35ecbf5b8bb7ad266de4fcaca3f00b74bf36adadefa4`, which
   adds File Notifications and reads of files in a Session's Drive. The
   frozen files subset adds the Organization routes
   `sessions/{id}/files/content` and `sessions/{id}/files/download-tickets`.

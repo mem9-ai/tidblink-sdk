@@ -1,6 +1,6 @@
 {
-  "revision": "29506fe56f9b0de17da5ac26a50b22a9662f1acb",
-  "sourceOpenApiSha256": "382d7109176cd2b9d6f7210e06948f67699d00b2aae15970917996383e4a4323",
+  "revision": "eb3a04d0c23d64f65cb80d9cbef80c332c7c080a",
+  "sourceOpenApiSha256": "73ecab7576483c43c65a35ecbf5b8bb7ad266de4fcaca3f00b74bf36adadefa4",
   "paths": {
     "/api/v1/org/users/{userId}/sessions/{id}/turns/audio": {
       "post": {

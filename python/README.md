@@ -10,7 +10,7 @@ not ship it to browsers or devices.
 
 It follows the [TypeScript SDK](../typescript/README.md): the same supported
 scope, behaviour, errors and recovery rules, for the same exact service
-revision ([29506fe5](https://github.com/mem9-ai/agent-stack/commit/29506fe56f9b0de17da5ac26a50b22a9662f1acb)).
+revision ([eb3a04d0](https://github.com/mem9-ai/agent-stack/commit/eb3a04d0c23d64f65cb80d9cbef80c332c7c080a)).
 The TypeScript README is the reference for what each capability does and how to
 recover from an uncertain outcome; this README covers how that surface looks in
 Python.
