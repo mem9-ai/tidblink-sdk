@@ -1,6 +1,6 @@
 {
-  "revision": "3e920bc73c754dce4cbd5782811063da770be290",
-  "sourceSchemaSha256": "03051fb7b387a054f1d21ab331fc557bc348d4719eac77d809daa37644366ed4",
+  "revision": "8009e3663a394bedbb468f070760756e0f091001",
+  "sourceSchemaSha256": "216c6289c646b7b08b1408979670847587b906a625ba51ccc573c55dec544d6a",
   "schema": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "tidb-link.backend.v1",
@@ -927,7 +927,7 @@
                 "type": "string"
               },
               "event": {
-                "description": "The Session event envelope: type (agent.session.turn.*, agent.session.realtime.*, agent.session.template_switch.*, agent.session.idle), sessionId, turnId, createdAt and data. agent.session.idle follows the terminal events of a Turn once the Session has released it; wait for it before session.send, an audio Turn or a Template switch. A failed Turn sends agent.session.turn.failed twice: data.event turn_error with the Turn's failure in data.payload (code, message and, for some codes, details; the same payload a Turn read returns as failure), then data.event turn_finished. With code mcp_authorization_required, an MCP Authorization stopped being usable during the Turn (revoked, or refused by the server with HTTP 401 or 403) and details.registrations lists {serverId, owner, reason} as in the session.send refusal; the Turn is not resumed, so send a new message once the authorization is usable again.",
+                "description": "The Session event envelope: type (agent.session.turn.*, agent.session.realtime.*, agent.session.template_switch.*, agent.session.idle), sessionId, turnId, createdAt and data. agent.session.idle follows the terminal events of a Turn once the Session has released it; wait for it before session.send, an audio Turn or a Template switch. A failed Turn sends agent.session.turn.failed twice: data.event turn_error with the Turn's failure in data.payload (code, message and, for some codes, details; the same payload a Turn read returns as failure), then data.event turn_finished. With code mcp_authorization_required, an MCP Authorization stopped being usable during the Turn (revoked, or refused by the server with HTTP 401 or 403) and details.registrations lists {serverId, owner, reason} as in the session.send refusal; the Turn is not resumed, so send a new message once the authorization is usable again. A File Notification arrives as agent.session.turn.item.added with data.event operation_step: its succeeded step carries data.payload.file {path, name, version, byteSize, updatedAt}, one file the Agent announced in the Session's Drive; read it pinned to version through the Session file content route or a download ticket. It asks for no reply.",
                 "type": "object",
                 "required": [
                   "type",

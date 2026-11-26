@@ -1,6 +1,6 @@
 {
-  "revision": "3e920bc73c754dce4cbd5782811063da770be290",
-  "sourceOpenApiSha256": "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c",
+  "revision": "8009e3663a394bedbb468f070760756e0f091001",
+  "sourceOpenApiSha256": "861b622236d74d3c6b697f0c2a2392ad7799f37154a7d32ce25c02847629b569",
   "paths": {
     "/api/v1/org/users/{userId}/sessions/{id}/turns/audio": {
       "post": {
@@ -428,6 +428,7 @@
                   "artifact_publish_failed",
                   "artifact_bytes_need_repair",
                   "drive_file_not_found",
+                  "drive_file_version_conflict",
                   "drive_path_too_long",
                   "drive_download_rate_limited",
                   "drive_download_provider_error",
@@ -907,6 +908,43 @@
                   },
                   "source": {
                     "$ref": "#/components/schemas/ClientToolOperationSource"
+                  },
+                  "file": {
+                    "description": "The file a File Notification announced, present only on the succeeded step of a file.notify Operation. The file stays in the Session's Drive and may change; read it pinned to version through the Session file content route or a download ticket. The Operation's resultPointer in Turn reads carries the same reference with kind file_notification.",
+                    "type": "object",
+                    "required": [
+                      "path",
+                      "name",
+                      "version",
+                      "byteSize",
+                      "updatedAt"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path relative to the Session's Drive root."
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "Display name, by default the path's last segment."
+                      },
+                      "version": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{1,32}$",
+                        "description": "Opaque version the file had when announced."
+                      },
+                      "byteSize": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date-time",
+                        "description": "Last modification time, or null when storage reports none."
+                      }
+                    }
                   }
                 }
               }
