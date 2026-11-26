@@ -1130,8 +1130,9 @@ time. A File Notification asks for no reply. A resumed cursor replays it, and a
 later Turn read keeps it as the `file.notify` Operation's `resultPointer` with
 `kind: "file_notification"`.
 
-The file stays in the Session's Drive, where the Agent may change it, and is
-deleted with the Session. `session.files` reads it by path:
+The file stays in the Session's Drive, where the Agent may change it, and
+becomes unreadable once the Session is deleted. `session.files` reads it by
+path:
 
 ```ts
 const bytes = await session.files.read(file.path, { version: file.version });
