@@ -2,12 +2,13 @@
 export const TIDB_LINK_API_VERSION = "0.0.1" as const;
 /** Exact service baseline for the supported refreshed SDK surface. */
 export const TIDB_LINK_REVISION =
-  "3e920bc73c754dce4cbd5782811063da770be290" as const;
+  "eb3a04d0c23d64f65cb80d9cbef80c332c7c080a" as const;
 
 export {
   TiDBLinkApiError,
   TiDBLinkError,
   ConflictError,
+  DriveFileVersionConflictError,
   ConnectionError,
   TurnWaitTimeoutError,
   InputNotAppliedError,
@@ -80,6 +81,11 @@ export type {
 } from "./user.js";
 export type { ListOptions, FetchFunction } from "./http.js";
 export { Session } from "./session.js";
+export { SessionDriveFiles } from "./session-drive-files.js";
+export type {
+  SessionDriveFileReadOptions,
+  SessionDriveFileTicket,
+} from "./session-drive-files.js";
 export type {
   BillingTag,
   CreateSessionOptions,
@@ -171,6 +177,9 @@ export type {
   TurnProgressEvent,
   TurnItemAddedEvent,
   OperationStepPayload,
+  NotifiedFile,
+  FileNotificationRefusal,
+  FileNotificationRefusalReason,
   TurnRequiresActionEvent,
   ClientToolCallPayload,
   TurnCompletedEvent,

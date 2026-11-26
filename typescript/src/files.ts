@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import {
   requestOptions,
   HttpClient,
+  isByteSize,
   isUnsentFailure,
   markUnsent,
+  mediaType,
   requireHashedLength,
   requireKnownKeys,
   unsentBody,
@@ -240,6 +242,44 @@ const transferUrl = (url: URL): URL => {
       "File transfer URL must be HTTP(S) without embedded credentials or a fragment",
     );
   return url;
+};
+
+/**
+ * GET a download URL, which carries its own authority, without the API Key.
+ * One HTTPS redirect is followed.
+ */
+export const fetchDownload = async (
+  http: HttpClient,
+  url: string,
+  signal: AbortSignal | undefined,
+): Promise<Response> => {
+  let destination = transferUrl(http.resolveUrl(url));
+  signal?.throwIfAborted();
+  try {
+    let response = await http.fetch(destination, {
+      redirect: "manual",
+      ...(signal ? { signal } : {}),
+    });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      await response.body?.cancel();
+      if (!location)
+        throw new TiDBLinkError(
+          "File download redirect omitted its destination",
+        );
+      destination = transferUrl(new URL(location, destination));
+      if (destination.protocol !== "https:")
+        throw new TiDBLinkError("File download redirect requires HTTPS");
+      response = await http.fetch(destination, {
+        redirect: "error",
+        ...(signal ? { signal } : {}),
+      });
+    }
+    return response;
+  } catch (cause) {
+    if (cause instanceof TiDBLinkError) throw cause;
+    throw new ConnectionError("File download could not be reached");
+  }
 };
 
 export class UserFiles {
@@ -675,15 +715,11 @@ export class UserFiles {
     const contentType =
       response.headers.get("content-type") ?? "application/octet-stream";
     try {
-      if (
-        contentType.split(";")[0]?.trim().toLowerCase() ===
-        "application/vnd.tidb-link.file-download+json"
-      ) {
+      if (mediaType(response) === "application/vnd.tidb-link.file-download+json") {
         const grant: FileDownloadGrant = await response.json();
         if (
           !grant?.url ||
-          !Number.isSafeInteger(grant.byteSize) ||
-          grant.byteSize < 0 ||
+          !isByteSize(grant.byteSize) ||
           !/^[a-f0-9]{64}$/.test(grant.sha256) ||
           !Number.isFinite(Date.parse(grant.expiresAt))
         )
@@ -712,33 +748,7 @@ export class UserFiles {
   ): Promise<Uint8Array> {
     options = requestOptions(options);
     requireActiveGrant(grant.expiresAt);
-    let destination = transferUrl(this.#http.resolveUrl(grant.url));
-    options?.signal?.throwIfAborted();
-    let response: Response;
-    try {
-      response = await this.#http.fetch(destination, {
-        redirect: "manual",
-        ...(options?.signal ? { signal: options.signal } : {}),
-      });
-      if ([301, 302, 303, 307, 308].includes(response.status)) {
-        const location = response.headers.get("location");
-        await response.body?.cancel();
-        if (!location)
-          throw new TiDBLinkError(
-            "File download redirect omitted its destination",
-          );
-        destination = transferUrl(new URL(location, destination));
-        if (destination.protocol !== "https:")
-          throw new TiDBLinkError("File download redirect requires HTTPS");
-        response = await this.#http.fetch(destination, {
-          redirect: "error",
-          ...(options?.signal ? { signal: options.signal } : {}),
-        });
-      }
-    } catch (cause) {
-      if (cause instanceof TiDBLinkError) throw cause;
-      throw new ConnectionError("File download could not be reached");
-    }
+    const response = await fetchDownload(this.#http, grant.url, options.signal);
     if (!response.ok) {
       await response.body?.cancel();
       throw new TiDBLinkApiError({

@@ -11,9 +11,10 @@ Template and Skill management, serving Connectors and reading them,
 Template/model discovery, Session management and Template switches,
 text submission, steering, cancellation, checkpoint retry, original-result waiting,
 continuous progress, Client Tools, Session connections over Backend Connections,
+File Notifications and reads of files in a Session's Drive,
 conversation history, file attachments,
 Realtime Model/Connection preparation, prerecorded audio and User usage reads for [service revision
-3e920bc7](https://github.com/mem9-ai/agent-stack/commit/3e920bc73c754dce4cbd5782811063da770be290).
+eb3a04d0](https://github.com/mem9-ai/agent-stack/commit/eb3a04d0c23d64f65cb80d9cbef80c332c7c080a).
 
 Text commands return durable receipts independently of execution. Waiting reads the
 original command's outcome. A Session is created directly from an explicit
@@ -425,7 +426,7 @@ The Handoff Turn summarizes the Session so far for the target Template. History
 reads return it as a Turn with `kind: "template_handoff"`, no `userMessage` and
 an empty `userMessages`; when it succeeds, its assistant Message is the summary.
 The service's
-[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/3e920bc73c754dce4cbd5782811063da770be290/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
+[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/eb3a04d0c23d64f65cb80d9cbef80c332c7c080a/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
 describes what the Session keeps across a switch (models, Billing Tag, Client
 Tools and creation options) and that cancelling the Handoff Turn fails the
 switch.
@@ -525,10 +526,13 @@ Session with a resumable cursor (see [Connecting a Session](#connecting-a-sessio
 process that keeps no connection, for example to recover a result after a restart.
 
 `asKnownSessionEvent(event)` narrows an event to the types the SDK knows: Turn
-lifecycle, drafts, progress, saved messages and Operation steps, Client Tool
-calls, Realtime transcripts and responses, Template switches and
-`agent.session.idle`. It returns `undefined` for anything else, which is still
-delivered unchanged. A draft (`agent.session.turn.output_text.snapshot`) is a
+lifecycle, drafts, progress, saved messages and Operation steps, including the
+`file` a File Notification announces or the `fileRefusal` of one the Agent
+could not make, Client Tool calls, Realtime transcripts
+and responses, Template switches and `agent.session.idle`. It returns
+`undefined` for anything else, which is still delivered unchanged, and for a
+known type whose data lacks the fields the SDK types, such as a malformed
+`file` or `fileRefusal`. A draft (`agent.session.turn.output_text.snapshot`) is a
 complete snapshot: replace what you showed, including with an empty reset.
 
 ## Connecting a Session
@@ -547,6 +551,7 @@ const conn = await organization.user(userId).session(sessionId).connect({
   onCursor: (cursor) => db.saveCursor(deviceId, cursor),
   onTranscript: (t) => app.push(deviceId, { role: "user", text: t.text }),
   onResponse: (r) => app.push(deviceId, { role: "assistant", text: r.text }),
+  onFile: (file) => app.push(deviceId, { file: file.name }), // see Files in a Session's Drive
   onEvent: (event) => forward(event),         // every event, in order
 });
 conn.closed.then((end) => console.log("connection ended", end.reason));
@@ -559,8 +564,9 @@ await conn.close();
   cursor and pass it back as `cursor` to replay what was missed; without one,
   delivery starts after the Session's latest event and history is not replayed.
   `onTranscript` and `onResponse` receive completed Realtime transcripts and
-  responses; `onEvent` receives every event, including types the SDK does not
-  know.
+  responses, and `onFile` each file the Agent announces with a File
+  Notification; `onEvent` receives every event, including types the SDK does
+  not know.
 - **Reconnection.** The SDK opens Backend Connections on demand, holds up to the
   `maxSessions` the core announces on each (1024 today) and opens another when
   one is full. After a lost connection, or when the core asks a connection to
@@ -1112,13 +1118,127 @@ The example returns the final conversation result; its exported
 directories or write Session text files. Organization owner-scoped clients can
 upload, read and attach the same ordinary Files.
 
+## Files in a Session's Drive
+
+The Agent can hand a file it produced in its Session's Drive, such as firmware
+it built, to your backend with a **File Notification**: its `notify_file` tool
+names the file and returns at once, and the tool's succeeded Operation step
+carries the file. `onFile` receives it on every Session connection, executing or
+observing, as `{ path, name, version, byteSize, updatedAt }` (`NotifiedFile`).
+`path` is relative to the Session's Drive root, `version` is the opaque version
+the file had when announced, and `updatedAt` is `null` when storage reports no
+time. A File Notification asks for no reply. A resumed cursor replays it, and a
+later Turn read keeps it as the `file.notify` Operation's `resultPointer` with
+`kind: "file_notification"`.
+
+When the Agent cannot announce a file, the tool's failed Operation step
+carries `fileRefusal`, `{ reason, path? }` (`FileNotificationRefusal`), instead
+of `file`, and `onFile` does not run; read it in `onEvent` with
+`asKnownSessionEvent`. A later Turn read keeps it on the failed `file.notify`
+Operation. `path` is the path the Agent tried, relative to the Session's Drive
+root when it resolves inside it, and absent when the Agent gave no usable one.
+`reason` is one of `not_found`, `directory`, `local_only`, `uploads`,
+`reserved`, `skills`, `invalid_path`, `path_too_long`, `invalid_arguments`,
+`limit_reached`, `drain_failed` (the Sandbox could not save its pending
+writes) or `unavailable`. The service may add reasons: treat an unknown one as
+a generic refusal.
+
+Only files in the Session's Drive can be announced. `build/`, `dist/`,
+`target/`, `tmp/` and similar folders, such as `node_modules/` and `.venv/`,
+stay in the Sandbox and never reach the Drive, so `notify_file` refuses a file
+there with `local_only`. Tell the model in the Template's instructions to build
+files it hands over into a synced folder such as `out/` or `firmware/`, for
+example with `-o out/firmware.bin`.
+
+The file stays in the Session's Drive, where the Agent may change it, and
+becomes unreadable once the Session is deleted. `session.files` reads it by
+path:
+
+```ts
+const bytes = await session.files.read(file.path, { version: file.version });
+const ticket = await session.files.createDownloadTicket(file.path, {
+  version: file.version,
+});
+// ticket: { url, expiresAt, byteSize }; its holder downloads without a key.
+```
+
+- `read(path, { version })` returns exactly the announced bytes. Once the file
+  has changed it throws `DriveFileVersionConflictError` (code
+  `drive_file_version_conflict`), a `ConflictError`. A missing file or
+  directory throws a 404 `TiDBLinkApiError` with code `drive_file_not_found`;
+  a Session that is deleted or belongs to another End User throws code
+  `session_not_found`. Without `version`, `read` returns the file's current
+  bytes.
+- The bytes are held in memory. Above 50 MiB the service answers with a
+  download ticket instead of the bytes, and `read` follows it without the API
+  Key and checks the size. A transfer that the file's change interrupts fails;
+  read again.
+- `createDownloadTicket(path, { version })` returns `{ url, expiresAt,
+  byteSize }` for a device or another process that holds no API Key. `url` is
+  absolute, and the ticket expires 60 seconds after it was issued. Downloading
+  a pinned ticket answers `409` once the file has changed. A ticket is a bearer
+  credential: do not log it. Paths longer than 192 bytes cannot be ticketed
+  (`400 drive_path_too_long`).
+- `path` must be relative to the Session's Drive root. Absolute paths, `..`
+  segments and `.tidb-link` are refused with `400 validation_error`.
+  `version` is opaque: pass it on as announced. An empty `path` or `version`
+  throws a `TypeError` before anything is sent; the service judges the rest
+  and refuses a malformed version with `400 validation_error`.
+
+Files are reached through the Organization-scoped Session handle,
+`organization.user(userId).session(sessionId)`, with the authority of writing
+the Session's files; a read-only Session stays readable. They are neither
+listed nor searchable, so keep the path a File Notification announced.
+
+When the device must act on the file and report back within the same Turn,
+declare a Client Tool that takes the `path` and `version`. Tell the model in
+the Template's instructions to call it after `notify_file`. The model passes
+the announced path and version as the call's arguments, and the device's
+answer is the tool's result:
+
+```ts
+run: async ({ path, version }, { signal }) => {
+  const ticket = await session.files.createDownloadTicket(path, { version, signal });
+  return device.flash({ url: ticket.url, byteSize: ticket.byteSize }, { signal });
+},
+```
+
+Keep the device connected until the Turn ends. A `flash_device` call made
+while no connection executes the Session is reported to the model as not
+performed. A build can take minutes, longer than `send()`'s default 60-second
+wait, so pass a `timeoutMs` that covers the build and close the connection
+only after `send()` returns.
+
+The packaged `flash-device.mjs` example declares this `flash_device` tool:
+`connectDeviceFlasher({ session, device, onFile })` connects the Session with
+it, and `downloadingDevice(save)` stands in for your device channel.
+`flashDeviceWorkflow({ session, device, text, clientEventId, timeoutMs, onFile })`
+connects, sends `text`, stays connected until the Turn ends and returns its
+result. It waits up to 10 minutes by default. When the wait ends first, it
+throws `TurnWaitTimeoutError` and disconnects, and the Turn goes on without the
+device. Set `AGENT_SERVICE_URL`, `ORGANIZATION_API_KEY`, `END_USER_ID`,
+`SESSION_ID`, `MESSAGE_TEXT` and `FIRMWARE_PATH`, where the stand-in saves the
+image, and optionally `TURN_TIMEOUT_SECONDS` (default 600), then run:
+
+```sh
+node node_modules/@tidblink/server/examples/flash-device.mjs
+```
+
+The model sees `run`'s result in the same Turn and can, for example, fix the
+build and call the tool again. A call has a 60-second deadline. When flashing
+takes longer, return that it started and declare a second tool that reports
+progress, or let the Turn end and send the device's result as the next
+message.
+
 ## Errors and uncertain outcomes
 
 Organization, text/progress/history and Session lifecycle methods accept
 `{ requestId?, signal? }` options; creation and list options include these fields.
 `TiDBLinkApiError` preserves status, service code, request identity and details;
-`ConflictError` preserves explicit 409/412 conflicts. The service's response
-request identity takes precedence over the one sent.
+`ConflictError` preserves explicit 409/412 conflicts, and its subclass
+`DriveFileVersionConflictError` a file in a Session's Drive that changed after
+its File Notification. The service's response request identity takes precedence
+over the one sent.
 
 Safe reads, keyed Session creation and Template switches use bounded retries
 with the same request identity and key. User creation,
@@ -1278,7 +1398,7 @@ packed artifact in a clean ESM TypeScript consumer. To verify the packed SDK and
 its examples against the real service, use the service's Node.js 26 runtime, install its
 pinned dependencies, generate Prisma, build its Hardware contract and prepare its
 current schema in a **dedicated test database**. See the selected service's
-[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/3e920bc73c754dce4cbd5782811063da770be290/docs/prisma-first-tidb-validation-and-rollout.md).
+[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/eb3a04d0c23d64f65cb80d9cbef80c332c7c080a/docs/prisma-first-tidb-validation-and-rollout.md).
 
 ```sh
 AGENT_SERVICE_ROOT=/path/to/agent-stack \
@@ -1336,14 +1456,24 @@ uses the existing controlled Drive9 and model suppliers. File cases use a separa
 fixture lifecycle with real upload state and a controlled Drive9/S3 byte supplier.
 They verify inline, multipart and empty uploads, cancellation and invalid content,
 large-file download-ticket redemption, and a real Runtime file read whose answer
-contains the uploaded content. The installed upload example exercises the same
+contains the uploaded content. A File Notification case runs the installed
+`flash-device.mjs` example's `flashDeviceWorkflow` while the real Runtime writes
+a file, first announces a path that has no file, then announces the file and
+calls the example's Client Tool with its path and version: an observing
+connection and the Turn read report the refusal as `fileRefusal` `not_found`,
+the installed SDK receives the file through `onFile`, the stand-in device
+downloads that version through a keyless ticket inside the tool, a pinned read
+returns the same bytes, and after a rewrite the SDK gets
+`DriveFileVersionConflictError`. A Session Drive file above 50 MiB cannot be
+written through the public routes, so its ticket answer is covered by the
+default HTTP tests only. The installed upload example exercises the same
 public workflow. Real supplier deployment certification is outside this evidence.
 Audio cases use the real transcription adapter with a controlled HTTP supplier.
 They cover recorded input, malformed/unsupported recordings, supplier refusals,
 model failure, active-response interruption and the installed audio example.
 The public Session projection exposes the frozen Template digest but hides the
 stored creation options. Those snapshots and active-Turn model freezing also rely
-on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/3e920bc73c754dce4cbd5782811063da770be290/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
+on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/eb3a04d0c23d64f65cb80d9cbef80c332c7c080a/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
 prove those hidden values.
 Usage cases seed controlled facts and verify both public projections, exact filters,
 paging and authority without executing messages to manufacture billing data.

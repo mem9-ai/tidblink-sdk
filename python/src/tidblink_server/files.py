@@ -21,8 +21,10 @@ from ._http import (
     HttpClient,
     byte_view,
     bytes_request,
+    is_byte_size,
     is_unsent_failure,
     mark_unsent,
+    media_type,
     query_string,
     require_hashed_length,
     segment,
@@ -239,7 +241,8 @@ def _is_sha256(value: object) -> bool:
     return isinstance(value, str) and bool(_SHA256_HEX.fullmatch(value))
 
 
-def _parse_time(value: object) -> datetime | None:
+def parse_time(value: object) -> datetime | None:
+    """An ISO 8601 time from the service, as an aware datetime, or None when it is not one."""
     if not isinstance(value, str):
         return None
     try:
@@ -291,7 +294,7 @@ def _require_ready(file: UserFile, byte_size: int, sha256: str) -> UserFile:
 
 
 def _require_active_grant(expires_at: object) -> None:
-    expiry = _parse_time(expires_at)
+    expiry = parse_time(expires_at)
     if expiry is None or expiry <= datetime.now(timezone.utc):
         raise TiDBLinkApiError(
             status=410,
@@ -345,6 +348,41 @@ def _require_part(part: object) -> FileUploadPart:
     ):
         raise TypeError("upload_part requires a FileUploadPart from presign_part")
     return part  # type: ignore[return-value]
+
+
+async def fetch_download(http: HttpClient, url: str) -> httpx.Response:
+    """GET a download URL, which carries its own authority, without the API Key, still streaming.
+
+    One HTTPS redirect is followed. The caller reads and closes the response.
+    """
+    destination = _transfer_url(str(http.resolve_url(url)))
+    client = http.client
+    try:
+        response = await client.send(
+            httpx.Request("GET", destination), stream=True, auth=None, follow_redirects=False
+        )
+        if response.status_code in _REDIRECTS:
+            location = response.headers.get("location")
+            await response.aclose()
+            if not location:
+                raise TiDBLinkError("File download redirect omitted its destination")
+            destination = _transfer_url(urljoin(destination, location))
+            if urlsplit(destination).scheme != "https":
+                raise TiDBLinkError("File download redirect requires HTTPS")
+            response = await client.send(
+                httpx.Request("GET", destination),
+                stream=True,
+                auth=None,
+                follow_redirects=False,
+            )
+            if response.is_redirect:
+                await response.aclose()
+                raise _RedirectRefused("File download redirected twice")
+    except TiDBLinkError:
+        raise
+    except Exception:
+        raise TiDBLinkConnectionError("File download could not be reached") from None
+    return response
 
 
 class UserFiles:
@@ -415,7 +453,7 @@ class UserFiles:
             or not isinstance(upload.get("file"), dict)
             or upload["file"].get("fileId") != upload["uploadId"]
             or upload.get("mode") not in ("tidb-link", "s3")
-            or _parse_time(upload.get("expiresAt")) is None
+            or parse_time(upload.get("expiresAt")) is None
             or upload.get("expectedChecksumVerification") != "whole"
         ):
             raise OutcomeUnknownError(
@@ -496,7 +534,7 @@ class UserFiles:
             or not part.get("url")
             or not isinstance(part.get("url"), str)
             or not isinstance(part.get("headers"), dict)
-            or _parse_time(part.get("expiresAt")) is None
+            or parse_time(part.get("expiresAt")) is None
         ):
             raise OutcomeUnknownError(
                 "Part signing returned no usable grant; reconcile before transferring",
@@ -728,16 +766,15 @@ class UserFiles:
         response, stable_request_id = await self._http.raw_response(path, request_id=request_id)
         content_type = response.headers.get("content-type") or "application/octet-stream"
         try:
-            if content_type.split(";")[0].strip().lower() == _DOWNLOAD_GRANT_TYPE:
+            if media_type(response) == _DOWNLOAD_GRANT_TYPE:
                 grant = json.loads(await response.aread())
                 if (
                     not isinstance(grant, dict)
                     or not grant.get("url")
                     or not isinstance(grant["url"], str)
-                    or not _is_int(grant.get("byteSize"))
-                    or grant["byteSize"] < 0
+                    or not is_byte_size(grant.get("byteSize"))
                     or not _is_sha256(grant.get("sha256"))
-                    or _parse_time(grant.get("expiresAt")) is None
+                    or parse_time(grant.get("expiresAt")) is None
                 ):
                     raise TiDBLinkError(
                         "File content returned no usable download grant", request_id=stable_request_id
@@ -761,33 +798,7 @@ class UserFiles:
         if not isinstance(grant, Mapping) or not isinstance(grant.get("url"), str):
             raise TypeError("download_from_grant requires a FileDownloadGrant")
         _require_active_grant(grant.get("expiresAt"))
-        destination = _transfer_url(str(self._http.resolve_url(grant["url"])))
-        client = self._http.client
-        try:
-            response = await client.send(
-                httpx.Request("GET", destination), stream=True, auth=None, follow_redirects=False
-            )
-            if response.status_code in _REDIRECTS:
-                location = response.headers.get("location")
-                await response.aclose()
-                if not location:
-                    raise TiDBLinkError("File download redirect omitted its destination")
-                destination = _transfer_url(urljoin(destination, location))
-                if urlsplit(destination).scheme != "https":
-                    raise TiDBLinkError("File download redirect requires HTTPS")
-                response = await client.send(
-                    httpx.Request("GET", destination),
-                    stream=True,
-                    auth=None,
-                    follow_redirects=False,
-                )
-                if response.is_redirect:
-                    await response.aclose()
-                    raise _RedirectRefused("File download redirected twice")
-        except TiDBLinkError:
-            raise
-        except Exception:
-            raise TiDBLinkConnectionError("File download could not be reached") from None
+        response = await fetch_download(self._http, grant["url"])
         try:
             if not response.is_success:
                 raise TiDBLinkApiError(

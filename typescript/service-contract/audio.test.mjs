@@ -92,6 +92,23 @@ test("prerecorded audio keeps its multipart request and distinct response-owned 
     "failed",
     "interrupted",
   ]);
+  // A File Notification's step carries the announced file, as onFile receives it.
+  const step = events.find(
+    (event) => event.properties.event.enum[0] === "operation_step",
+  ).properties.payload;
+  assert(!step.required.includes("file"));
+  const file = step.properties.file;
+  assert.deepEqual(file.required, ["path", "name", "version", "byteSize", "updatedAt"]);
+  assert.equal(file.properties.updatedAt.nullable, true);
+  assert.equal(file.properties.version.type, "string");
+  // Its failed step says why it announced nothing, as FileNotificationRefusal types it.
+  assert(!step.required.includes("fileRefusal"));
+  const refusal = step.properties.fileRefusal;
+  assert.deepEqual(refusal.required, ["reason"]);
+  assert.deepEqual(Object.keys(refusal.properties).sort(), ["path", "reason"]);
+  assert.equal(refusal.properties.reason.type, "string");
+  assert(refusal.properties.reason.enum.includes("local_only"));
+  assert.equal(refusal.properties.path.type, "string");
 });
 
 

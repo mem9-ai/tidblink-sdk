@@ -36,6 +36,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
   assert(files.includes("examples/lamp-backend.mjs"));
   assert(files.includes("examples/upload-file.mjs"));
   assert(files.includes("examples/submit-audio.mjs"));
+  assert(files.includes("examples/flash-device.mjs"));
   assert(!files.some((file) => file.includes("workspace")));
   assert(
     files.every(
@@ -52,6 +53,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
         file === "examples/control-turn.mjs" ||
         file === "examples/upload-file.mjs" ||
         file === "examples/submit-audio.mjs" ||
+        file === "examples/flash-device.mjs" ||
         /^dist\/.+\.(?:js|d\.ts|map)$/.test(file),
     ),
   );
@@ -115,6 +117,8 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       Template, TemplateContent, TemplateCatalog, TemplatePage, SkillUpload, SkillDetail,
       KnownSessionEvent,
       Connector, ServeConnectorOptions, ServedConnector, ServedConnectorEnd,
+      NotifiedFile, FileNotificationRefusal, SessionDriveFiles, SessionDriveFileReadOptions, SessionDriveFileTicket,
+      OperationResultPointer,
     } from "@tidblink/server";
     import {
       TIDB_LINK_API_VERSION,
@@ -128,6 +132,8 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       TiDBLinkError,
       OrganizationClient,
       asKnownSessionEvent,
+      ConflictError,
+      DriveFileVersionConflictError,
     } from "@tidblink/server";
     // @ts-expect-error HTTP callback Connectors were retired; serve Connectors over Backend Connections.
     import { ConnectorKeySet, verifyConnectorCallback, readConnectorCallContext } from "@tidblink/server";
@@ -237,8 +243,14 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
         cursor: "12",
         onCursor: async (cursor: string) => { void cursor; },
         onTranscript: (transcript) => { const text: string = transcript.text; void text; },
+        onFile: async (file: NotifiedFile) => {
+          const updatedAt: string | null = file.updatedAt;
+          const bytes: Uint8Array = await session.files.read(file.path, { version: file.version });
+          void updatedAt; void bytes;
+        },
         onEvent: (event: SessionEvent) => {
           const known: KnownSessionEvent | undefined = asKnownSessionEvent(event);
+          if (known?.type === "agent.session.turn.item.added" && known.data.event === "operation_step") { const file: NotifiedFile | undefined = known.data.payload.file; const refusal: FileNotificationRefusal | undefined = known.data.payload.fileRefusal; void file; void refusal; }
           if (known?.type === "agent.session.turn.requires_action") { const callId: string = known.data.payload.calls[0]!.callId; void callId; }
           if (known?.type === "agent.session.idle") { const idle: SessionIdleEvent = known; const turnId: string | null = idle.data.turnId; void turnId; }
         },
@@ -250,6 +262,22 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       const token: string = grant.connectToken;
       const end: SessionConnectionEnd = await conn.closed;
       if (end.reason === "error") { const cause: unknown = end.error; void cause; }
+      const files: SessionDriveFiles = session.files;
+      const readOptions: SessionDriveFileReadOptions = { version: "v1", requestId: "read-1" };
+      const ticket: SessionDriveFileTicket = await files.createDownloadTicket("build/firmware.bin", readOptions);
+      const ticketUrl: string = ticket.url;
+      try { await files.read("build/firmware.bin", readOptions); } catch (error) {
+        if (error instanceof DriveFileVersionConflictError) { const conflict: ConflictError = error; void conflict; }
+      }
+      const turn = await session.getTurn("turn_1");
+      for (const operation of turn.operations) {
+        const pointer: OperationResultPointer | null | undefined = operation.resultPointer;
+        if (operation.kind === "file.notify" && pointer?.kind === "file_notification") { const version: string = pointer.version; void version; }
+        if (operation.kind === "file.notify" && operation.fileRefusal) { const reason: string = operation.fileRefusal.reason; const tried: string | undefined = operation.fileRefusal.path; void reason; void tried; }
+      }
+      // @ts-expect-error A Session file read has no other options.
+      await files.read("a.bin", { ifMatch: "x" });
+      void ticketUrl;
       // @ts-expect-error observe is a boolean.
       await session.connect({ observe: "yes" });
       // @ts-expect-error The SSE subscription APIs are removed; use connect().
@@ -591,6 +619,10 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
     const { createLampBackend, memoryStore } = await import("@tidblink/server/examples/lamp-backend.mjs");
     assert.equal(typeof createLampBackend, "function");
     assert.equal(typeof memoryStore, "function");
+    const { connectDeviceFlasher, downloadingDevice, flashDeviceWorkflow } = await import("@tidblink/server/examples/flash-device.mjs");
+    assert.equal(typeof connectDeviceFlasher, "function");
+    assert.equal(typeof downloadingDevice, "function");
+    assert.equal(typeof flashDeviceWorkflow, "function");
     const { createSessionWorkflow } = await import("@tidblink/server/examples/create-session.mjs");
     assert.equal(typeof createSessionWorkflow, "function");
     assert.equal(typeof prepareRealtimeConnection, "function");

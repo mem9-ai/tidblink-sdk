@@ -25,6 +25,7 @@ from ._http import (
     HttpClient,
     _dump_json,
     byte_view,
+    media_type,
     require_hashed_length,
     segment,
 )
@@ -37,8 +38,8 @@ from .errors import (
     TurnFailedError,
     TurnInterruptedError,
 )
-from .events import ClientToolCallsPayload, is_client_tool_calls_payload
-from .history import BillingTag, ClarificationItem, OperationStatus, TurnFailure
+from .events import ClientToolCallsPayload, NotifiedFile, is_client_tool_calls_payload
+from .history import BillingTag, ClarificationItem, FileNotificationRefusal, OperationStatus, TurnFailure
 from .turn import valid_clarification
 
 __all__ = [
@@ -90,6 +91,10 @@ class AudioOperationStepPayload(TypedDict):
     category: NotRequired[Literal["tool_call", "skill_read"]]
     skill: NotRequired[dict[str, str]]
     source: NotRequired[dict[str, Any]]
+    #: On the succeeded step of a File Notification: the file it announced.
+    file: NotRequired[NotifiedFile]
+    #: On the failed step of a File Notification: why it announced nothing.
+    fileRefusal: NotRequired[FileNotificationRefusal]
 
 
 class AudioAssistantMessagePayload(TypedDict):
@@ -316,14 +321,6 @@ def _check_payload(name: str, payload: dict[str, Any]) -> None:
         raise TiDBLinkError("Audio response returned an invalid terminal status")
 
 
-def _is_event_stream(response: httpx.Response) -> bool:
-    content_type = response.headers.get("content-type")
-    return (
-        content_type is not None
-        and content_type.split(";")[0].strip().lower() == "text/event-stream"
-    )
-
-
 async def stream_audio(
     http: HttpClient,
     session_id: str,
@@ -358,7 +355,7 @@ async def stream_audio(
             },
             request_id=request_id,
         )
-        if response.status_code != 201 or not _is_event_stream(response):
+        if response.status_code != 201 or media_type(response) != "text/event-stream":
             raise TiDBLinkError("Audio response omitted its event stream")
         async for frame in decode_sse(response.aiter_bytes()):
             event = json.loads(frame.data)

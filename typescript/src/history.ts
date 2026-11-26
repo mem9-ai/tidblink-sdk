@@ -6,6 +6,7 @@ import {
   type ListOptions,
 } from "./http.js";
 import type { RequestOptions } from "./organization.js";
+import type { FileNotificationRefusal, NotifiedFile } from "./events.js";
 import type { BillingTag, ClarificationItem } from "./session.js";
 
 export type TurnStatus = "running" | "succeeded" | "failed" | "interrupted";
@@ -94,7 +95,9 @@ export type OperationResultPointer =
       sha256: string;
       name: string;
       alt: string;
-    };
+    }
+  /** A succeeded File Notification: the file it announced, as its event carried it. */
+  | ({ kind: "file_notification" } & NotifiedFile);
 
 export interface OperationRecord {
   id: string;
@@ -127,6 +130,7 @@ export interface OperationRecord {
     | "artifact.get"
     | "artifact.publish"
     | "chat.image"
+    | "file.notify"
     | "schedule.create"
     | "schedule.update"
     | "schedule.list"
@@ -189,6 +193,8 @@ export interface OperationRecord {
   label?: string;
   category?: "tool_call" | "skill_read";
   skill?: { skillId: string; name: string };
+  /** On a failed `file.notify` Operation: why its File Notification announced nothing. */
+  fileRefusal?: FileNotificationRefusal;
   createdAt: string;
   completedAt?: string;
 }

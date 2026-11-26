@@ -8,8 +8,8 @@
     "node": ">=22.12"
   },
   "tidbLinkApiVersion": "0.0.1",
-  "tidbLinkRevision": "3e920bc73c754dce4cbd5782811063da770be290",
-  "tidbLinkOpenApiSha256": "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c",
+  "tidbLinkRevision": "eb3a04d0c23d64f65cb80d9cbef80c332c7c080a",
+  "tidbLinkOpenApiSha256": "73ecab7576483c43c65a35ecbf5b8bb7ad266de4fcaca3f00b74bf36adadefa4",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -27,6 +27,7 @@
     "./examples/upload-file.mjs": "./examples/upload-file.mjs",
     "./examples/submit-audio.mjs": "./examples/submit-audio.mjs",
     "./examples/serve-connector.mjs": "./examples/serve-connector.mjs",
+    "./examples/flash-device.mjs": "./examples/flash-device.mjs",
     "./examples/lamp-backend.mjs": "./examples/lamp-backend.mjs"
   },
   "files": [
@@ -40,6 +41,7 @@
     "examples/upload-file.mjs",
     "examples/submit-audio.mjs",
     "examples/serve-connector.mjs",
+    "examples/flash-device.mjs",
     "examples/lamp-backend.mjs"
   ],
   "scripts": {

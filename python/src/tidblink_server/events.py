@@ -11,8 +11,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Generic, Literal, NotRequired, TypedDict, TypeVar, Union
 
+from ._http import is_byte_size
 from .errors import TiDBLinkError
-from .history import ClarificationItem, RealtimeResponseKind
+from .history import ClarificationItem, FileNotificationRefusal, RealtimeResponseKind
 
 __all__ = [
     "SessionEvent",
@@ -23,6 +24,7 @@ __all__ = [
     "TurnProgressEvent",
     "TurnItemAddedEvent",
     "OperationStepPayload",
+    "NotifiedFile",
     "TurnRequiresActionEvent",
     "ClientToolCallPayload",
     "TurnCompletedEvent",
@@ -93,6 +95,24 @@ class OperationStepSkill(TypedDict):
     name: str
 
 
+class NotifiedFile(TypedDict):
+    """One file the Agent announced in its Session's Drive with a File Notification.
+
+    The file stays in the Session's Drive and may change; read it pinned to
+    ``version`` with ``session.files.read(path, version=...)``.
+    """
+
+    #: Path relative to the Session's Drive root.
+    path: str
+    #: Display name, by default the path's last segment.
+    name: str
+    #: Opaque version the file had when announced.
+    version: str
+    byteSize: int
+    #: Last modification time, or None when storage reports none.
+    updatedAt: str | None
+
+
 class OperationStepPayload(TypedDict):
     operationId: str
     status: Literal["running", "succeeded", "failed", "interrupted", "unknown_result"]
@@ -101,6 +121,10 @@ class OperationStepPayload(TypedDict):
     skill: NotRequired[OperationStepSkill]
     #: ``{"type": "session_client"}``, or another source with more fields.
     source: NotRequired[dict[str, Any]]
+    #: On the succeeded step of a File Notification: the file it announced.
+    file: NotRequired[NotifiedFile]
+    #: On the failed step of a File Notification: why it announced nothing.
+    fileRefusal: NotRequired[FileNotificationRefusal]
 
 
 class ClientToolCallPayload(TypedDict):
@@ -335,6 +359,27 @@ _FINISHED_STATUS = {
 }
 
 
+def _is_notified_file(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return (
+        _is_string(value.get("path"))
+        and _is_string(value.get("name"))
+        and _is_string(value.get("version"))
+        and is_byte_size(value.get("byteSize"))
+        and "updatedAt" in value
+        and (value["updatedAt"] is None or _is_string(value["updatedAt"]))
+    )
+
+
+def _is_file_notification_refusal(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and _is_string(value.get("reason"))
+        and ("path" not in value or _is_string(value["path"]))
+    )
+
+
 def is_client_tool_calls_payload(payload: Mapping[str, Any]) -> bool:
     """Whether a ``client_tool_calls`` payload has the fields the SDK types."""
     calls = payload.get("calls")
@@ -359,6 +404,8 @@ def _is_known_turn_payload(name: str, payload: Mapping[str, Any], type_: str) ->
             _is_string(payload.get("operationId"))
             and _is_string(payload.get("status"))
             and _is_string(payload.get("label"))
+            and ("file" not in payload or _is_notified_file(payload["file"]))
+            and ("fileRefusal" not in payload or _is_file_notification_refusal(payload["fileRefusal"]))
         )
     if name == "client_tool_calls":
         return is_client_tool_calls_payload(payload)

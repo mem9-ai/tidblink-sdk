@@ -43,6 +43,14 @@ export class TiDBLinkApiError extends TiDBLinkError {
 
 export class ConflictError extends TiDBLinkApiError {}
 
+/**
+ * A file in a Session's Drive is no longer at the version a read or download
+ * ticket was pinned to (`drive_file_version_conflict`): the Agent changed it
+ * after announcing it. A missing file or Session is a 404 `TiDBLinkApiError`
+ * instead.
+ */
+export class DriveFileVersionConflictError extends ConflictError {}
+
 export class ConnectionError extends TiDBLinkError {}
 
 /** The request may have succeeded, so repeating it could create another effect. */

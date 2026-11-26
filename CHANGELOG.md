@@ -2,6 +2,68 @@
 
 ## Unreleased
 
+- Align with service
+  [eb3a04d0](https://github.com/mem9-ai/agent-stack/commit/eb3a04d0c23d64f65cb80d9cbef80c332c7c080a),
+  OpenAPI SHA-256
+  `73ecab7576483c43c65a35ecbf5b8bb7ad266de4fcaca3f00b74bf36adadefa4`, which
+  adds File Notifications and reads of files in a Session's Drive. The
+  frozen files subset adds the Organization routes
+  `sessions/{id}/files/content` and `sessions/{id}/files/download-tickets`.
+  Otherwise the subsets change only by the error codes
+  `drive_file_version_conflict` and `drive_file_too_large`, by the optional
+  `file` of an `operation_step` event, by the optional `fileRefusal` of a
+  failed `operation_step` event and of an Operation in Turn reads, and by
+  descriptions.
+  `drive_file_too_large` is the Console's refusal to download a Template
+  Test's large file; no route the SDK calls answers it.
+- `session.connect({ onFile })` runs for each file the Agent announces with a
+  File Notification: an `agent.session.turn.item.added` `operation_step` whose
+  payload carries `file`, `{ path, name, version, byteSize, updatedAt }`
+  (`NotifiedFile`). It runs after `onEvent`, which still receives the raw
+  event, and before the cursor advances. `asKnownSessionEvent` accepts the
+  optional `file` and does not narrow an event whose `file` is malformed.
+- `session.files` (`SessionDriveFiles`) reads files in the Session's Drive.
+  `read(path, { version })` returns the bytes and, for a file above 50 MiB,
+  follows the download ticket the service answers with, without the API Key.
+  `createDownloadTicket(path, { version })` returns `{ url, expiresAt,
+  byteSize }` with an absolute `url` that a device downloads without a key.
+  The `version` is opaque: the SDK sends any non-empty text as announced and
+  leaves its form to the service.
+- `DriveFileVersionConflictError`, a `ConflictError`, is raised when a pinned
+  read, ticket or ticket download finds that the file has changed
+  (`drive_file_version_conflict`). A missing file stays a 404
+  `TiDBLinkApiError` with code `drive_file_not_found`, and a missing Session
+  one with code `session_not_found`.
+- Turn reads type the `file.notify` Operation kind and its
+  `file_notification` result pointer. The audio Turn's `operation_step` event
+  type carries the same optional `file`.
+- A File Notification the Agent could not make says why: its failed
+  `operation_step` and the failed `file.notify` Operation in Turn reads carry
+  `fileRefusal`, `{ reason, path? }` (`FileNotificationRefusal`), with a
+  `reason` such as `not_found`, `directory` or `local_only` (a folder such as
+  `build/` that the Sandbox never saves) and the path the Agent tried. The
+  service may add reasons. `asKnownSessionEvent` (`as_known_session_event`)
+  accepts the optional `fileRefusal` and does not narrow an event whose
+  `fileRefusal` is malformed; `onFile` does not run for it. The audio Turn's
+  `operation_step` event type carries the same optional `fileRefusal`.
+- The packaged `flash-device.mjs` example (`examples/flash_device.py` in
+  Python) is the notify-then-Client-Tool device scenario: its `flash_device`
+  Client Tool hands the device a keyless ticket for the announced version, and
+  the device's answer is the tool's result. The service verification runs it.
+  `flashDeviceWorkflow` (`flash_device_workflow`) sends the message and keeps
+  the device connected until the Turn ends, waiting up to 10 minutes by
+  default because a build can take minutes; the script reads the wait from
+  `TURN_TIMEOUT_SECONDS`. The READMEs say to build files the Agent hands over
+  into a synced folder such as `out/`, since `build/`, `dist/`, `target/` and
+  `tmp/` stay in the Sandbox.
+- The Python SDK offers the same: `session.connect(on_file=...)`,
+  `session.files.read(path, version=...)`,
+  `session.files.create_download_ticket(path, version=...)`,
+  `DriveFileVersionConflictError` and `NotifiedFile`.
+- The methods are on the Organization-scoped Session handle,
+  `organization.user(userId).session(sessionId)`; the SDKs still support no
+  User API Keys.
+
 ## 0.5.1
 
 Stable release on the `latest` dist-tag for service
