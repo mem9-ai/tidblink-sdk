@@ -63,6 +63,8 @@ class OperationRecord(TypedDict):
     status: OperationStatus
     input: Any
     output: NotRequired[Any]
+    #: A succeeded ``file.notify`` Operation (a File Notification) has
+    #: ``{"kind": "file_notification", **file}``, the file its event carried.
     resultPointer: dict[str, Any]
     effectSummary: NotRequired[dict[str, Any] | None]
     compensatesOperationId: NotRequired[str | None]

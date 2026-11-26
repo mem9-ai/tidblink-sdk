@@ -10,7 +10,7 @@ not ship it to browsers or devices.
 
 It follows the [TypeScript SDK](../typescript/README.md): the same supported
 scope, behaviour, errors and recovery rules, for the same exact service
-revision ([3e920bc7](https://github.com/mem9-ai/agent-stack/commit/3e920bc73c754dce4cbd5782811063da770be290)).
+revision ([8009e366](https://github.com/mem9-ai/agent-stack/commit/8009e3663a394bedbb468f070760756e0f091001)).
 The TypeScript README is the reference for what each capability does and how to
 recover from an uncertain outcome; this README covers how that surface looks in
 Python.
@@ -21,7 +21,8 @@ Organization information, End User provisioning, Template and Skill
 management, serving Connectors and reading them, Template/model discovery, Session
 management and Template switches, text submission, steering, cancellation,
 checkpoint retry, original-result waiting, Client Tools, Session connections
-over Backend Connections with progress and events, conversation history, file
+over Backend Connections with progress and events, File Notifications and
+reads of files in a Session's Drive, conversation history, file
 attachments, Realtime Model/Connection preparation, prerecorded audio and User
 usage reads. Every resource workflow uses an Organization API Key with an
 explicitly selected End User.
@@ -91,7 +92,7 @@ asyncio.run(main())
 | `organization.close()` | `await organization.close()` or `async with OrganizationClient(...)`; it also closes the HTTP client the SDK created (one passed as `http_client` stays open), so REST calls stop afterwards |
 
 Error classes keep their TypeScript names otherwise (`TiDBLinkApiError`,
-`ConflictError`, `OutcomeUnknownError`, `TurnWaitTimeoutError`,
+`ConflictError`, `DriveFileVersionConflictError`, `OutcomeUnknownError`, `TurnWaitTimeoutError`,
 `InputNotAppliedError`, `TurnFailedError`, `TurnInterruptedError`,
 `BackendConnectionClosedError`, `BackendRequestError`, `FileUploadError`, …),
 with snake_case attributes (`error.request_id`, `error.input_id`). The error an
@@ -162,6 +163,7 @@ conn = await organization.user(user_id).session(session_id).connect(
     },
     cursor=await db.get_cursor(device_id),
     on_cursor=lambda cursor: db.save_cursor(device_id, cursor),
+    on_file=lambda file: app.push(device_id, {"file": file["name"]}),
     on_event=forward,
 )
 reply = await conn.send("Turn the light on", on_progress=lambda draft: show(draft))
@@ -182,6 +184,10 @@ the model as not performed at once: no `run` handler sees it, and no
 are executed only by the Session's executing connection; no REST command
 answers them.
 
+`on_file` receives each file the Agent announces with a File Notification, as
+the service's `{"path", "name", "version", "byteSize", "updatedAt"}` dict
+(`NotifiedFile`); see [Files in a Session's Drive](#files-in-a-sessions-drive).
+
 Callbacks may be plain functions or coroutines. They run one event at a time;
 an exception in one goes to `on_error`, or else to the event loop's exception
 handler. At a Client Tool call's deadline the SDK cancels the `run` task and
@@ -189,6 +195,56 @@ reports the timeout.
 
 The smart lamp example, [`examples/lamp_backend.py`](examples/lamp_backend.py),
 follows the [shared specification](../examples/lamp/README.md).
+
+## Files in a Session's Drive
+
+`session.files` reads a file in the Session's Drive by path, pinned to the
+version a File Notification announced, with the rules of the
+[TypeScript SDK](../typescript/README.md#files-in-a-sessions-drive):
+
+```python
+data = await session.files.read(file["path"], version=file["version"])  # bytes
+ticket = await session.files.create_download_ticket(file["path"], version=file["version"])
+# ticket: {"url", "expiresAt", "byteSize"}; url is absolute, and its holder downloads without a key.
+```
+
+A file changed since its announcement raises `DriveFileVersionConflictError`, a
+`ConflictError`; a missing file raises a 404 `TiDBLinkApiError` with code
+`drive_file_not_found`, and a deleted or foreign Session code
+`session_not_found`. Above 50 MiB, `read` follows the download ticket the
+service answers with, without the API Key. A `version` without the form of an
+announced one raises `ValueError` before anything is sent.
+
+To have a device act on the file within the same Turn, declare a Client Tool
+that takes the path and version, and tell the model in the Template's
+instructions to call it after `notify_file`:
+
+```python
+session = organization.user(user_id).session(session_id)
+
+
+async def flash_device(args, context):
+    ticket = await session.files.create_download_ticket(args["path"], version=args["version"])
+    result = await ask_device(device_id, "flash", {"url": ticket["url"]})  # cancelled at context.deadline_at
+    return "Flashed" if result["ok"] else f"Flash failed: {result['error']}"
+
+
+conn = await session.connect(
+    tools={
+        "flash_device": ClientToolHandler(
+            description="Flash a firmware image onto the device. Call notify_file first and pass its path and version.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}, "version": {"type": "string"}},
+                "required": ["path", "version"],
+                "additionalProperties": False,
+            },
+            run=flash_device,
+        )
+    },
+    on_file=lambda file: app.push(device_id, {"building": file["name"]}),
+)
+```
 
 ## Files, audio, Realtime and usage
 

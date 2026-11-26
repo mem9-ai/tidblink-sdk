@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from backend_support import API_KEY, FakeCore, Harness, harness, until  # noqa: F401
+from backend_support import API_KEY, FakeCore, Harness, harness, turn_event, until  # noqa: F401
 from tidblink_server import BackendConnectionClosedError, BackendRequestError, TiDBLinkError
 from tidblink_server.session import Session
 from tidblink_server.session_connection import ClientToolHandler, SessionConnection, SessionConnectionEnd
@@ -109,6 +109,7 @@ async def test_observing_connections_and_resume_cursors_are_sent_as_given_invali
         ({"observe": True, "max_buffered_bytes": 1.5}, TypeError),
         ({"max_buffered_bytes": 1024}, ValueError),
         ({"on_event": "nope"}, TypeError),
+        ({"on_file": {}}, TypeError),
         ({"unknown": True}, TypeError),
     ]
     for options, error in cases:
@@ -167,6 +168,64 @@ async def test_events_arrive_in_order_through_their_callbacks_and_the_cursor_adv
     assert len(errors) == 2
     assert str(errors[0]) == "application failure"
     assert isinstance(errors[1], TiDBLinkError)
+
+
+async def test_on_file_receives_each_file_a_file_notification_announces_after_on_event_and_before_the_cursor(
+    harness: Harness,
+) -> None:
+    core = await harness.core()
+    seen: list[tuple[Any, ...]] = []
+    errors: list[BaseException] = []
+
+    async def on_file(file: dict[str, Any]) -> None:
+        await asyncio.sleep(0.005)
+        seen.append(("file", file))
+        if file["name"] == "broken.bin":
+            raise RuntimeError("application failure")
+
+    conn = await session_of(harness, core).connect(
+        on_event=lambda event: seen.append(("event", event["cursor"])),
+        on_file=on_file,
+        on_cursor=lambda cursor: seen.append(("cursor", cursor)),
+        on_error=errors.append,
+    )
+    firmware = {
+        "path": "build/firmware.bin",
+        "name": "firmware.bin",
+        "version": "v1AAAAAAAAAAAAAAAAAAAA",
+        "byteSize": 4,
+        "updatedAt": CREATED_AT,
+    }
+
+    def step(cursor: str, **payload: Any) -> dict[str, Any]:
+        return turn_event(
+            cursor,
+            "agent.session.turn.item.added",
+            "operation_step",
+            {"operationId": f"op_{cursor}", "label": "Notifying file", "category": "tool_call", **payload},
+        )
+
+    peer = core.peers[0]
+    peer.send(step("11", status="running"))
+    peer.send(step("12", status="succeeded", label="Completed notifying file", file=firmware))
+    peer.send(step("13", status="succeeded", file={**firmware, "byteSize": "4"}))
+    peer.send(step("14", status="succeeded", file={**firmware, "name": "broken.bin"}))
+    await until(lambda: conn.cursor == "14")
+    assert seen == [
+        ("event", "11"),
+        ("cursor", "11"),
+        ("event", "12"),
+        ("file", firmware),
+        ("cursor", "12"),
+        # A malformed file reaches on_event only.
+        ("event", "13"),
+        ("cursor", "13"),
+        ("event", "14"),
+        ("file", {**firmware, "name": "broken.bin"}),
+        ("cursor", "14"),
+    ]
+    assert len(errors) == 1
+    assert str(errors[0]) == "application failure"
 
 
 async def test_without_on_error_callback_errors_go_to_the_event_loops_exception_handler(harness: Harness) -> None:

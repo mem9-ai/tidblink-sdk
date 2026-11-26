@@ -13,6 +13,7 @@ __all__ = [
     "TiDBLinkError",
     "TiDBLinkApiError",
     "ConflictError",
+    "DriveFileVersionConflictError",
     "TiDBLinkConnectionError",
     "OutcomeUnknownError",
     "TurnWaitTimeoutError",
@@ -78,6 +79,15 @@ class TiDBLinkApiError(TiDBLinkError):
 
 class ConflictError(TiDBLinkApiError):
     """An explicit conflict: HTTP 409, or 412 for a stale ETag."""
+
+
+class DriveFileVersionConflictError(ConflictError):
+    """A file in a Session's Drive is no longer at the version a read or download ticket was pinned to.
+
+    The service's code is ``drive_file_version_conflict``: the Agent changed
+    the file after announcing it. A missing file or Session is a 404
+    :class:`TiDBLinkApiError` instead.
+    """
 
 
 class TiDBLinkConnectionError(TiDBLinkError):

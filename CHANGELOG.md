@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- Align with service
+  [8009e366](https://github.com/mem9-ai/agent-stack/commit/8009e3663a394bedbb468f070760756e0f091001),
+  OpenAPI SHA-256
+  `861b622236d74d3c6b697f0c2a2392ad7799f37154a7d32ce25c02847629b569`, which
+  adds File Notifications and reads of files in a Session's Drive. The
+  frozen files subset adds the Organization routes
+  `sessions/{id}/files/content` and `sessions/{id}/files/download-tickets`.
+  The other subsets change only by the error code
+  `drive_file_version_conflict`, by the optional `file` of an `operation_step`
+  event, and by descriptions.
+- `session.connect({ onFile })` runs for each file the Agent announces with a
+  File Notification: an `agent.session.turn.item.added` `operation_step` whose
+  payload carries `file`, `{ path, name, version, byteSize, updatedAt }`
+  (`NotifiedFile`). It runs after `onEvent`, which still receives the raw
+  event, and before the cursor advances. `asKnownSessionEvent` accepts the
+  optional `file` and does not narrow an event whose `file` is malformed.
+- `session.files` (`SessionDriveFiles`) reads files in the Session's Drive.
+  `read(path, { version })` returns the bytes and, for a file above 50 MiB,
+  follows the download ticket the service answers with, without the API Key.
+  `createDownloadTicket(path, { version })` returns `{ url, expiresAt,
+  byteSize }` with an absolute `url` that a device downloads without a key.
+- `DriveFileVersionConflictError`, a `ConflictError`, is raised when a pinned
+  read, ticket or ticket download finds that the file has changed
+  (`drive_file_version_conflict`). A missing file stays a 404
+  `TiDBLinkApiError` with code `drive_file_not_found`, and a missing Session
+  one with code `session_not_found`.
+- Turn reads type the `file.notify` Operation kind and its
+  `file_notification` result pointer. The audio Turn's `operation_step` event
+  type carries the same optional `file`.
+- The package README shows a notify-then-Client-Tool device example, where a
+  `flash_device` Client Tool hands the device a ticket for the announced
+  version.
+- The Python SDK offers the same: `session.connect(on_file=...)`,
+  `session.files.read(path, version=...)`,
+  `session.files.create_download_ticket(path, version=...)`,
+  `DriveFileVersionConflictError` and `NotifiedFile`.
+- The methods are on the Organization-scoped Session handle,
+  `organization.user(userId).session(sessionId)`; the SDKs still support no
+  User API Keys.
+
 ## 0.5.1
 
 Stable release on the `latest` dist-tag for service

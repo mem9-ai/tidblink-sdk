@@ -27,6 +27,7 @@ from .events import (
     TurnProgressEvent,
     TurnItemAddedEvent,
     OperationStepPayload,
+    NotifiedFile,
     TurnRequiresActionEvent,
     ClientToolCallPayload,
     TurnCompletedEvent,
@@ -72,6 +73,10 @@ from .files import (
     FileContent,
     FileUploadError,
     FileUploadOutcomeUnknownError,
+)
+from .session_drive_files import (
+    SessionDriveFiles,
+    SessionDriveFileTicket,
 )
 from .skills import (
     Skills,
@@ -134,6 +139,7 @@ from .errors import (
     BackendConnectionClosedError,
     BackendRequestError,
     ConflictError,
+    DriveFileVersionConflictError,
     InputNotAppliedError,
     OutcomeUnknownError,
     TiDBLinkApiError,
@@ -188,9 +194,9 @@ from .user import AgentModelCatalog, AgentTemplate, AgentTemplatePage, EndUserCl
 #: TiDB Link OpenAPI version supported by this SDK release.
 TIDB_LINK_API_VERSION = "0.0.1"
 #: Exact service baseline for the supported SDK surface.
-TIDB_LINK_REVISION = "3e920bc73c754dce4cbd5782811063da770be290"
+TIDB_LINK_REVISION = "8009e3663a394bedbb468f070760756e0f091001"
 #: SHA-256 of that service revision's ``docs/openapi.yaml``.
-TIDB_LINK_OPENAPI_SHA256 = "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c"
+TIDB_LINK_OPENAPI_SHA256 = "861b622236d74d3c6b697f0c2a2392ad7799f37154a7d32ce25c02847629b569"
 
 __all__ = [
     "OMIT",
@@ -232,6 +238,7 @@ __all__ = [
     "TiDBLinkError",
     "TiDBLinkApiError",
     "ConflictError",
+    "DriveFileVersionConflictError",
     "TiDBLinkConnectionError",
     "OutcomeUnknownError",
     "TurnWaitTimeoutError",
@@ -256,6 +263,8 @@ __all__ = [
     "UserFiles",
     "UserFile",
     "UserFileSource",
+    "SessionDriveFiles",
+    "SessionDriveFileTicket",
     "FileUploadCapabilities",
     "FileUpload",
     "FileUploadGrant",
@@ -334,6 +343,7 @@ __all__ = [
     "TurnProgressEvent",
     "TurnItemAddedEvent",
     "OperationStepPayload",
+    "NotifiedFile",
     "TurnRequiresActionEvent",
     "ClientToolCallPayload",
     "TurnCompletedEvent",

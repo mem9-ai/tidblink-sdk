@@ -51,6 +51,23 @@ export type TurnProgressEvent = KnownEvent<
   TurnEventData<"progress", { text: string }>
 > & { turnId: string };
 
+/**
+ * One file the Agent announced in its Session's Drive with a File
+ * Notification. The file stays in the Session's Drive and may change; read it
+ * pinned to `version` with `session.files.read(path, { version })`.
+ */
+export interface NotifiedFile {
+  /** Path relative to the Session's Drive root. */
+  path: string;
+  /** Display name, by default the path's last segment. */
+  name: string;
+  /** Opaque version the file had when announced. */
+  version: string;
+  byteSize: number;
+  /** Last modification time, or null when storage reports none. */
+  updatedAt: string | null;
+}
+
 export interface OperationStepPayload {
   operationId: string;
   status: "running" | "succeeded" | "failed" | "interrupted" | "unknown_result";
@@ -58,6 +75,8 @@ export interface OperationStepPayload {
   category?: "tool_call" | "skill_read";
   skill?: { skillId: string; name: string };
   source?: { type: "session_client" } | { type: string; [field: string]: unknown };
+  /** On the succeeded step of a File Notification: the file it announced. */
+  file?: NotifiedFile;
 }
 
 export type TurnItemAddedEvent = KnownEvent<
@@ -189,6 +208,15 @@ const FINISHED_STATUS: Record<string, string> = {
 const isTextPayload = (payload: Record<string, unknown>) =>
   isString(payload.text);
 
+const isNotifiedFile = (value: unknown): value is NotifiedFile =>
+  isObject(value) &&
+  isString(value.path) &&
+  isString(value.name) &&
+  isString(value.version) &&
+  Number.isSafeInteger(value.byteSize) &&
+  (value.byteSize as number) >= 0 &&
+  (value.updatedAt === null || isString(value.updatedAt));
+
 /** Whether a `client_tool_calls` payload has the fields the SDK types. */
 export const isClientToolCallsPayload = (
   payload: Record<string, unknown>,
@@ -219,7 +247,8 @@ const isKnownTurnPayload = (
       return (
         isString(payload.operationId) &&
         isString(payload.status) &&
-        isString(payload.label)
+        isString(payload.label) &&
+        (payload.file === undefined || isNotifiedFile(payload.file))
       );
     case "client_tool_calls":
       return isClientToolCallsPayload(payload);

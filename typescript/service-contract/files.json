@@ -1,6 +1,6 @@
 {
-  "revision": "3e920bc73c754dce4cbd5782811063da770be290",
-  "sourceOpenApiSha256": "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c",
+  "revision": "8009e3663a394bedbb468f070760756e0f091001",
+  "sourceOpenApiSha256": "861b622236d74d3c6b697f0c2a2392ad7799f37154a7d32ce25c02847629b569",
   "paths": {
     "/api/v1/org/users/{userId}/files": {
       "get": {
@@ -1358,6 +1358,295 @@
         ]
       }
     },
+    "/api/v1/org/users/{userId}/sessions/{id}/files/content": {
+      "get": {
+        "description": "Reads one file in the Session's Drive by its path, such as the path a File Notification announced. With `version`, only that version is read: a file rewritten since then answers 409 drive_file_version_conflict, and a transfer is aborted if the file changes before its last byte. Without `version`, the current bytes are read. Files up to the existing 50 MiB bounded-download limit return their bytes with a media type inferred from the file extension (application/octet-stream otherwise); larger files return application/vnd.tidb-link.file-download+json with a short-lived download ticket for the same path and version. Session file reads use the authority of Session file writes; a read-only Session stays readable.\n\nAuthorization: OrganizationApiKey; persisted credentials determine Organization and End User scope.",
+        "operationId": "OrganizationSessionDriveFilesController_content",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "required": true,
+            "in": "query",
+            "description": "Path of the file relative to the Session's Drive root, for example `reports/summary.md`. Absolute paths, `..` segments and `.tidb-link` are refused.",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": false,
+            "in": "query",
+            "description": "Opaque version from a File Notification. When present, only that version is read; another current version answers 409 drive_file_version_conflict.",
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,32}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file bytes, or a download ticket for a file above 50 MiB.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "example": "private, no-store"
+                }
+              },
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string",
+                  "example": "nosniff"
+                }
+              }
+            },
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/vnd.tidb-link.file-download+json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "url",
+                    "expiresAt",
+                    "byteSize"
+                  ],
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "byteSize": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation_error: the path or version is invalid; drive_path_too_long: the path is too long for a download ticket.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A current Organization API Key is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A Organization API Key is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "session_not_found: the End User or the owned Session is unavailable or deleted; drive_file_not_found: no file exists at the path in the Session's Drive, or the path is a directory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "drive_file_version_conflict: the file is no longer at the requested version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage or required durable audit is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OrganizationApiKey": []
+          }
+        ],
+        "summary": "Read a file in the Session's Drive",
+        "tags": [
+          "OrganizationSessions"
+        ]
+      }
+    },
+    "/api/v1/org/users/{userId}/sessions/{id}/files/download-tickets": {
+      "post": {
+        "description": "Issues a 60-second Drive Download Ticket for one file in the Session's Drive, optionally pinned to its current version. The ticket binds the Organization, End User, Session, path and version; its holder redeems it at the returned URL without a key. Redemption rechecks the Session and, for Organization-issued tickets, the issuing credential, then streams the file; a pinned ticket answers 409 drive_file_version_conflict once the file has changed and aborts a transfer if the file changes before its last byte. Paths longer than 192 bytes cannot be ticketed (400 drive_path_too_long).\n\nAuthorization: OrganizationApiKey; persisted credentials determine Organization and End User scope.",
+        "operationId": "OrganizationSessionDriveFilesController_downloadTicket",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionDriveFileDownloadTicketOpenApiDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDriveFileDownloadTicketResponseOpenApiDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation_error: the path or version is invalid; drive_path_too_long: the path is too long for a download ticket.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A current Organization API Key is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A Organization API Key is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "session_not_found: the End User or the owned Session is unavailable or deleted; drive_file_not_found: no file exists at the path in the Session's Drive, or the path is a directory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "drive_file_version_conflict: the file is no longer at the requested version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage or required durable audit is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OrganizationApiKey": []
+          }
+        ],
+        "summary": "Issue a download ticket for a file in the Session's Drive",
+        "tags": [
+          "OrganizationSessions"
+        ]
+      }
+    },
     "/api/v1/drive-uploads/{ticket}": {
       "put": {
         "description": "No API Key is required. Send every returned uploadUrl header and exactly Content-Length bytes. The ticket is valid for 60 seconds at admission; the upload intent retains its own expiry. An identical repeated PUT returns the same ready File. Replay the original create request and Idempotency-Key to obtain a fresh URL. Responses, including errors, are non-cacheable and allow any browser origin without credentials.\n\nAuthorization: short-lived content-bound upload ticket; no API Key required.",
@@ -1508,7 +1797,7 @@
     },
     "/api/v1/drive-downloads/{ticket}": {
       "get": {
-        "description": "Anonymous, ticket-authorized endpoint for every authenticated download resource kind. Returns complete same-path inline bytes or an HTTPS Drive9 storage redirect with bounded presign exposure. Organization-issued Drive tickets require their exact issuing credential to remain current at new redemption admission; revoked or rotated issuers return 404. An admitted transfer may finish within existing limits. A returned provider URL retains its own expiry and is not revoked by this core check. Legacy unattributed v3.drive tickets are refused; obtain a fresh ticket.\n\nAuthorization: short-lived download ticket; no API Key required.",
+        "description": "Anonymous, ticket-authorized endpoint for every authenticated download resource kind. Returns complete same-path inline bytes or an HTTPS Drive9 storage redirect with bounded presign exposure. Organization-issued Drive tickets require their exact issuing credential to remain current at new redemption admission; revoked or rotated issuers return 404. An admitted transfer may finish within existing limits. A returned provider URL retains its own expiry and is not revoked by this core check. Legacy unattributed v3.drive tickets are refused; obtain a fresh ticket. Tickets for a file in a Session's Drive always stream inline: redemption rechecks that the Session still exists, answers 409 drive_file_version_conflict when a pinned file has changed, and aborts the transfer if the file changes before its last byte.\n\nAuthorization: short-lived download ticket; no API Key required.",
         "operationId": "DriveDownloadController_redeem",
         "parameters": [
           {
@@ -1518,7 +1807,7 @@
             "description": "Opaque 60-second download ticket; consumers must follow the current maxLength.",
             "schema": {
               "type": "string",
-              "maxLength": 538
+              "maxLength": 761
             }
           }
         ],
@@ -1608,6 +1897,16 @@
           },
           "404": {
             "description": "Invalid, expired, or missing file.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "drive_file_version_conflict: the file in the Session's Drive is no longer at the ticket's pinned version.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1790,6 +2089,7 @@
                   "artifact_publish_failed",
                   "artifact_bytes_need_repair",
                   "drive_file_not_found",
+                  "drive_file_version_conflict",
                   "drive_path_too_long",
                   "drive_download_rate_limited",
                   "drive_download_provider_error",
@@ -2509,6 +2809,48 @@
         },
         "required": [
           "part"
+        ]
+      },
+      "SessionDriveFileDownloadTicketOpenApiDto": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "Path of the file relative to the Session's Drive root, for example `reports/summary.md`. Absolute paths, `..` segments and `.tidb-link` are refused.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "version": {
+            "description": "Opaque version from a File Notification. When present, only that version is read; another current version answers 409 drive_file_version_conflict.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,32}$"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "SessionDriveFileDownloadTicketResponseOpenApiDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "description": "Relative URL of the short-lived ticket; its holder redeems it without a key.",
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "byteSize": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": false
+          }
+        },
+        "required": [
+          "url",
+          "expiresAt",
+          "byteSize"
         ]
       },
       "UploadStatusResponseDto": {

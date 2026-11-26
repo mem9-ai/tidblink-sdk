@@ -1,6 +1,6 @@
 {
-  "revision": "3e920bc73c754dce4cbd5782811063da770be290",
-  "sourceOpenApiSha256": "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c",
+  "revision": "8009e3663a394bedbb468f070760756e0f091001",
+  "sourceOpenApiSha256": "861b622236d74d3c6b697f0c2a2392ad7799f37154a7d32ce25c02847629b569",
   "paths": {
     "/api/v1/org/users/{userId}/agents": {
       "post": {
@@ -1599,6 +1599,7 @@
                   "artifact_publish_failed",
                   "artifact_bytes_need_repair",
                   "drive_file_not_found",
+                  "drive_file_version_conflict",
                   "drive_path_too_long",
                   "drive_download_rate_limited",
                   "drive_download_provider_error",
