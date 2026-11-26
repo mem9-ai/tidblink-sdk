@@ -1456,12 +1456,15 @@ uses the existing controlled Drive9 and model suppliers. File cases use a separa
 fixture lifecycle with real upload state and a controlled Drive9/S3 byte supplier.
 They verify inline, multipart and empty uploads, cancellation and invalid content,
 large-file download-ticket redemption, and a real Runtime file read whose answer
-contains the uploaded content. A File Notification case lets the real Runtime
-write a file, announce it and call the installed `flash-device.mjs` example's
-Client Tool with its path and version: the installed SDK receives it through
-`onFile`, the stand-in device downloads that version through a keyless ticket
-inside the tool, a pinned read returns the same bytes, and after a rewrite the
-SDK gets `DriveFileVersionConflictError`. A Session Drive file above 50 MiB cannot be
+contains the uploaded content. A File Notification case runs the installed
+`flash-device.mjs` example's `flashDeviceWorkflow` while the real Runtime writes
+a file, first announces a path that has no file, then announces the file and
+calls the example's Client Tool with its path and version: an observing
+connection and the Turn read report the refusal as `fileRefusal` `not_found`,
+the installed SDK receives the file through `onFile`, the stand-in device
+downloads that version through a keyless ticket inside the tool, a pinned read
+returns the same bytes, and after a rewrite the SDK gets
+`DriveFileVersionConflictError`. A Session Drive file above 50 MiB cannot be
 written through the public routes, so its ticket answer is covered by the
 default HTTP tests only. The installed upload example exercises the same
 public workflow. Real supplier deployment certification is outside this evidence.

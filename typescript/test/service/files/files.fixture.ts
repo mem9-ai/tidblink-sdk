@@ -200,8 +200,10 @@ beforeAll(async () => {
     const selectedPath = JSON.stringify(context.messages).match(
       /\/home\/user\/uploads\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+/,
     )?.[0];
-    // Build a file, announce it with notify_file, then pass the announced
-    // path and version on to the application's flash_device Client Tool.
+    // Build a file, first announce a path that has no file, which the
+    // service refuses, then announce the file with notify_file and pass the
+    // announced path and version on to the application's flash_device Client
+    // Tool.
     const notifyStep = (): AssistantMessage["content"] | undefined => {
       if (!JSON.stringify(context.messages).includes("SDK_FIXTURE_NOTIFY_FILE"))
         return undefined;
@@ -225,6 +227,14 @@ beforeAll(async () => {
           content: "firmware v1",
         });
       if (toolResult.toolName === "write_file")
+        return call("notify_file", {
+          path: "/home/user/workspace/builds/missing.bin",
+        });
+      if (
+        toolResult.toolName === "notify_file" &&
+        toolResult.isError &&
+        !JSON.stringify(context.messages).includes("Firmware 1")
+      )
         return call("notify_file", {
           path: "/home/user/workspace/builds/firmware.bin",
           name: "Firmware 1",

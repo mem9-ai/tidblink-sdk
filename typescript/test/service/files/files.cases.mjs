@@ -6,10 +6,11 @@ import {
   DriveFileVersionConflictError,
   OrganizationClient,
   TiDBLinkApiError,
+  asKnownSessionEvent,
 } from "@tidblink/server";
 import {
-  connectDeviceFlasher,
   downloadingDevice,
+  flashDeviceWorkflow,
 } from "@tidblink/server/examples/flash-device.mjs";
 import { uploadFileWorkflow } from "@tidblink/server/examples/upload-file.mjs";
 
@@ -213,8 +214,13 @@ test("the installed upload example includes file content in its conversation", a
   assert(result.result.text.includes(unique), result.result.text);
 });
 
-test("the installed flash-device example flashes the version a File Notification announced, which a rewrite retires", async () => {
+test("the installed flash-device example flashes the version a File Notification announced, which a rewrite retires; a refused one says why", async () => {
   const organization = new OrganizationClient({
+    baseUrl,
+    apiKey: process.env.SDK_ORGANIZATION_KEY,
+  });
+  // Another process: an OrganizationClient connects each Session once.
+  const monitor = new OrganizationClient({
     baseUrl,
     apiKey: process.env.SDK_ORGANIZATION_KEY,
   });
@@ -230,7 +236,25 @@ test("the installed flash-device example flashes the version a File Notification
     const device = downloadingDevice((image) =>
       flashed.push(Buffer.from(image).toString()),
     );
-    const conn = await connectDeviceFlasher({
+    // An observer sees the failed step of the File Notification the service
+    // refuses: the Agent first announces a path that has no file.
+    const refusedSteps = [];
+    let turnEnded;
+    const ended = new Promise((resolve) => (turnEnded = resolve));
+    await monitor.user(process.env.SDK_USER_ID).session(session.id).connect({
+      observe: true,
+      onEvent: (event) => {
+        const known = asKnownSessionEvent(event);
+        if (
+          known?.type === "agent.session.turn.item.added" &&
+          known.data.event === "operation_step" &&
+          known.data.payload.fileRefusal
+        )
+          refusedSteps.push(known.data.payload);
+        if (event.type === "agent.session.turn.completed") turnEnded();
+      },
+    });
+    const reply = await flashDeviceWorkflow({
       session,
       device: {
         flash: (ticket, options) => {
@@ -238,10 +262,9 @@ test("the installed flash-device example flashes the version a File Notification
           return device.flash(ticket, options);
         },
       },
-      onFile: (file) => announced.push(file),
-    });
-    const reply = await conn.send("SDK_FIXTURE_NOTIFY_FILE: build the firmware and flash it", {
+      text: "SDK_FIXTURE_NOTIFY_FILE: build the firmware and flash it",
       timeoutMs: 30000,
+      onFile: (file) => announced.push(file),
     });
     assert.equal(reply.text, `Device answered: Flashed ${"firmware v1".length} bytes`);
     assert.equal(announced.length, 1);
@@ -269,15 +292,34 @@ test("the installed flash-device example flashes the version a File Notification
       ).toString(),
       "firmware v1",
     );
-    // A late reader recovers the announcement from the Turn's Operations.
+    // A late reader recovers the announcement, and the refusal, from the
+    // Turn's Operations.
     const turn = await session.getTurn(reply.turnId);
-    assert.deepEqual(
-      turn.operations
-        .filter((operation) => operation.kind === "file.notify")
-        .map((operation) => operation.resultPointer),
-      [{ kind: "file_notification", ...file }],
+    const [refused, succeeded, ...others] = turn.operations.filter(
+      (operation) => operation.kind === "file.notify",
     );
-    await conn.close();
+    assert.deepEqual(others, []);
+    assert.equal(succeeded.status, "succeeded");
+    assert.deepEqual(succeeded.resultPointer, { kind: "file_notification", ...file });
+    assert.equal(succeeded.fileRefusal, undefined);
+    const fileRefusal = { reason: "not_found", path: "builds/missing.bin" };
+    assert.equal(refused.status, "failed");
+    assert.deepEqual(refused.fileRefusal, fileRefusal);
+    await Promise.race([
+      ended,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("The observer saw no Turn end")), 10000).unref(),
+      ),
+    ]);
+    assert.deepEqual(
+      refusedSteps.map(({ operationId, status, file, fileRefusal }) => ({
+        operationId,
+        status,
+        file,
+        fileRefusal,
+      })),
+      [{ operationId: refused.id, status: "failed", file: undefined, fileRefusal }],
+    );
 
     // Rewriting the file retires the announced version.
     const rewrite = await fetch(
@@ -329,6 +371,6 @@ test("the installed flash-device example flashes the version a File Notification
         error.code === "session_not_found",
     );
   } finally {
-    await organization.close();
+    await Promise.all([organization.close(), monitor.close()]);
   }
 });
