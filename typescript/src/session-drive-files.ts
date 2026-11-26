@@ -25,7 +25,6 @@ export interface SessionDriveFileTicket {
 }
 
 const DOWNLOAD_TICKET_TYPE = "application/vnd.tidb-link.file-download+json";
-const VERSION = /^[A-Za-z0-9_-]{1,32}$/;
 
 /**
  * Files in one Session's Drive, read by path, such as the path a File
@@ -148,12 +147,13 @@ const fileOptions = (
   );
   if (typeof path !== "string" || !path)
     throw new TypeError("A Session file path must be non-empty text");
+  // The version is opaque: its form is the service's to judge.
   if (
     options.version !== undefined &&
-    (typeof options.version !== "string" || !VERSION.test(options.version))
+    (typeof options.version !== "string" || !options.version)
   )
     throw new TypeError(
-      "A Session file version must be the version a File Notification announced",
+      "A Session file version must be the non-empty text a File Notification announced",
     );
   return { ...options };
 };

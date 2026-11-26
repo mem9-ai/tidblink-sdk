@@ -265,7 +265,8 @@ test("a File Notification reaches onFile and its Client Tool reads the announced
         updatedAt: undefined,
       },
     );
-    assert.match(file.version, /^[A-Za-z0-9_-]{1,32}$/);
+    assert.equal(typeof file.version, "string");
+    assert(file.version);
     assert.equal(flashed.length, 1);
     assert.equal(flashed[0].bytes, "firmware v1");
     assert.equal(flashed[0].ticket.byteSize, file.byteSize);

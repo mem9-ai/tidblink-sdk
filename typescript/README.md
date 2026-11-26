@@ -1159,9 +1159,10 @@ const ticket = await session.files.createDownloadTicket(file.path, {
   credential: do not log it. Paths longer than 192 bytes cannot be ticketed
   (`400 drive_path_too_long`).
 - `path` must be relative to the Session's Drive root. Absolute paths, `..`
-  segments and `.tidb-link` are refused with `400 validation_error`. A
-  `version` without the form of an announced one (1–32 letters, digits, `_`
-  or `-`) is refused with a `TypeError` before anything is sent.
+  segments and `.tidb-link` are refused with `400 validation_error`.
+  `version` is opaque: pass it on as announced. An empty `path` or `version`
+  throws a `TypeError` before anything is sent; the service judges the rest
+  and refuses a malformed version with `400 validation_error`.
 
 Files are reached through the Organization-scoped Session handle,
 `organization.user(userId).session(sessionId)`, with the authority of writing

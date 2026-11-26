@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime
 from typing import Any, TypedDict
 
@@ -16,7 +15,6 @@ from .files import fetch_download, require_active_grant
 __all__ = ["SessionDriveFiles", "SessionDriveFileTicket"]
 
 _DOWNLOAD_TICKET_TYPE = "application/vnd.tidb-link.file-download+json"
-_VERSION = re.compile(r"[A-Za-z0-9_-]{1,32}")
 
 
 class SessionDriveFileTicket(TypedDict):
@@ -38,11 +36,12 @@ def _require_file(path: object, version: object) -> None:
         raise TypeError("A Session file path must be text")
     if not path:
         raise ValueError("A Session file path must not be empty")
+    # The version is opaque: its form is the service's to judge.
     if version is not None:
         if not isinstance(version, str):
             raise TypeError("A Session file version must be text")
-        if not _VERSION.fullmatch(version):
-            raise ValueError("A Session file version must be the version a File Notification announced")
+        if not version:
+            raise ValueError("A Session file version must be the non-empty text a File Notification announced")
 
 
 def _is_time(value: object) -> bool:

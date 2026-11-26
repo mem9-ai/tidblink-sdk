@@ -23,6 +23,8 @@
   follows the download ticket the service answers with, without the API Key.
   `createDownloadTicket(path, { version })` returns `{ url, expiresAt,
   byteSize }` with an absolute `url` that a device downloads without a key.
+  The `version` is opaque: the SDK sends any non-empty text as announced and
+  leaves its form to the service.
 - `DriveFileVersionConflictError`, a `ConflictError`, is raised when a pinned
   read, ticket or ticket download finds that the file has changed
   (`drive_file_version_conflict`). A missing file stays a 404

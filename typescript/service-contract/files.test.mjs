@@ -97,7 +97,8 @@ test("files in a Session's Drive are read by path and version, with a distinct v
   );
   assert.equal(query.path.required, true);
   assert.equal(query.version.required, false);
-  assert.equal(query.version.schema.pattern, "^[A-Za-z0-9_-]{1,32}$");
+  // The SDK passes the version on as it was announced and leaves its form to the service.
+  assert.equal(query.version.schema.type, "string");
   const content = read.responses["200"].content;
   assert.equal(content["*/*"].schema.format, "binary");
   // A large file answers with a ticket, which has no SHA-256, unlike File content.

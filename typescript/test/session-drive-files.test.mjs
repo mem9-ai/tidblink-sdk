@@ -236,6 +236,34 @@ test("createDownloadTicket returns an absolute keyless URL for the file, pinned 
   );
 });
 
+test("a version is opaque: the service, not the SDK, judges its form", async () => {
+  const requests = [];
+  const baseUrl = await serve(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    requests.push(
+      req.method === "GET"
+        ? new URL(req.url, "http://x").searchParams.get("version")
+        : JSON.parse(body).version,
+    );
+    refuse(res, 400, "validation_error");
+  });
+  const files = sessionOf(baseUrl).files;
+  const version = `a future/version form+${"x".repeat(40)}`;
+  for (const pinned of [
+    files.read("a.bin", { version }),
+    files.createDownloadTicket("a.bin", { version }),
+  ])
+    await assert.rejects(
+      pinned,
+      (error) =>
+        error instanceof TiDBLinkApiError &&
+        error.status === 400 &&
+        error.code === "validation_error",
+    );
+  assert.deepEqual(requests, [version, version]);
+});
+
 test("invalid Session file arguments never dispatch", async () => {
   let requests = 0;
   const baseUrl = await serve((req, res) => {
@@ -247,8 +275,7 @@ test("invalid Session file arguments never dispatch", async () => {
     ["", {}],
     [7, {}],
     ["a.bin", { version: "" }],
-    ["a.bin", { version: "has space" }],
-    ["a.bin", { version: "x".repeat(33) }],
+    ["a.bin", { version: 1 }],
     ["a.bin", { unknown: true }],
   ]) {
     await assert.rejects(files.read(path, options), TypeError);

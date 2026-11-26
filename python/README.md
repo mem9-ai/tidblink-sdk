@@ -212,8 +212,9 @@ A file changed since its announcement raises `DriveFileVersionConflictError`, a
 `ConflictError`; a missing file raises a 404 `TiDBLinkApiError` with code
 `drive_file_not_found`, and a deleted or foreign Session code
 `session_not_found`. Above 50 MiB, `read` follows the download ticket the
-service answers with, without the API Key. A `version` without the form of an
-announced one raises `ValueError` before anything is sent.
+service answers with, without the API Key. `version` is opaque: an empty
+`path` or `version` raises `ValueError` before anything is sent, and the
+service judges the rest.
 
 To have a device act on the file within the same Turn, declare a Client Tool
 that takes the path and version, and tell the model in the Template's

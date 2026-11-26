@@ -162,14 +162,22 @@ async def test_create_download_ticket_returns_an_absolute_keyless_url_for_the_fi
     assert missing.value.code == "drive_file_not_found"
 
 
+async def test_a_version_is_opaque_the_service_not_the_sdk_judges_its_form() -> None:
+    files, service = files_of(lambda request, _: refuse(400, "validation_error"))
+    version = "a future/version form+" + "x" * 40
+    for pinned in (files.read, files.create_download_ticket):
+        with pytest.raises(TiDBLinkApiError) as refused:
+            await pinned("a.bin", version=version)
+        assert (refused.value.status, refused.value.code) == (400, "validation_error")
+    assert [service.calls[0].query["version"], service.calls[1].json()["version"]] == [version, version]
+
+
 async def test_invalid_session_file_arguments_never_dispatch() -> None:
     files, service = files_of(lambda request, _: httpx.Response(500))
     cases: list[tuple[Any, dict[str, Any], type[Exception]]] = [
         ("", {}, ValueError),
         (7, {}, TypeError),
         ("a.bin", {"version": ""}, ValueError),
-        ("a.bin", {"version": "has space"}, ValueError),
-        ("a.bin", {"version": "x" * 33}, ValueError),
         ("a.bin", {"version": 1}, TypeError),
         ("a.bin", {"unknown": True}, TypeError),
     ]

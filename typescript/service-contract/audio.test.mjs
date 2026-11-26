@@ -100,7 +100,7 @@ test("prerecorded audio keeps its multipart request and distinct response-owned 
   const file = step.properties.file;
   assert.deepEqual(file.required, ["path", "name", "version", "byteSize", "updatedAt"]);
   assert.equal(file.properties.updatedAt.nullable, true);
-  assert.equal(file.properties.version.pattern, "^[A-Za-z0-9_-]{1,32}$");
+  assert.equal(file.properties.version.type, "string");
 });
 
 
