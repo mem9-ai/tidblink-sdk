@@ -3,15 +3,17 @@
 ## Unreleased
 
 - Align with service
-  [8009e366](https://github.com/mem9-ai/agent-stack/commit/8009e3663a394bedbb468f070760756e0f091001),
+  [94c6905c](https://github.com/mem9-ai/agent-stack/commit/94c6905cfe5730454b101f66aa2f649446b4c008),
   OpenAPI SHA-256
-  `861b622236d74d3c6b697f0c2a2392ad7799f37154a7d32ce25c02847629b569`, which
+  `0c0c77a30558b9dc6930b468643349b55687c532316c4c04389ba69869ba33db`, which
   adds File Notifications and reads of files in a Session's Drive. The
   frozen files subset adds the Organization routes
   `sessions/{id}/files/content` and `sessions/{id}/files/download-tickets`.
-  The other subsets change only by the error code
-  `drive_file_version_conflict`, by the optional `file` of an `operation_step`
-  event, and by descriptions.
+  Otherwise the subsets change only by the error codes
+  `drive_file_version_conflict` and `drive_file_too_large`, by the optional
+  `file` of an `operation_step` event, and by descriptions.
+  `drive_file_too_large` is the Console's refusal to download a Template
+  Test's large file; no route the SDK calls answers it.
 - `session.connect({ onFile })` runs for each file the Agent announces with a
   File Notification: an `agent.session.turn.item.added` `operation_step` whose
   payload carries `file`, `{ path, name, version, byteSize, updatedAt }`

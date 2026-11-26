@@ -14,7 +14,7 @@ continuous progress, Client Tools, Session connections over Backend Connections,
 File Notifications and reads of files in a Session's Drive,
 conversation history, file attachments,
 Realtime Model/Connection preparation, prerecorded audio and User usage reads for [service revision
-8009e366](https://github.com/mem9-ai/agent-stack/commit/8009e3663a394bedbb468f070760756e0f091001).
+94c6905c](https://github.com/mem9-ai/agent-stack/commit/94c6905cfe5730454b101f66aa2f649446b4c008).
 
 Text commands return durable receipts independently of execution. Waiting reads the
 original command's outcome. A Session is created directly from an explicit
@@ -426,7 +426,7 @@ The Handoff Turn summarizes the Session so far for the target Template. History
 reads return it as a Turn with `kind: "template_handoff"`, no `userMessage` and
 an empty `userMessages`; when it succeeds, its assistant Message is the summary.
 The service's
-[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/8009e3663a394bedbb468f070760756e0f091001/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
+[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/94c6905cfe5730454b101f66aa2f649446b4c008/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
 describes what the Session keeps across a switch (models, Billing Tag, Client
 Tools and creation options) and that cancelling the Handoff Turn fails the
 switch.
@@ -1368,7 +1368,7 @@ packed artifact in a clean ESM TypeScript consumer. To verify the packed SDK and
 its examples against the real service, use the service's Node.js 26 runtime, install its
 pinned dependencies, generate Prisma, build its Hardware contract and prepare its
 current schema in a **dedicated test database**. See the selected service's
-[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/8009e3663a394bedbb468f070760756e0f091001/docs/prisma-first-tidb-validation-and-rollout.md).
+[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/94c6905cfe5730454b101f66aa2f649446b4c008/docs/prisma-first-tidb-validation-and-rollout.md).
 
 ```sh
 AGENT_SERVICE_ROOT=/path/to/agent-stack \
@@ -1440,7 +1440,7 @@ They cover recorded input, malformed/unsupported recordings, supplier refusals,
 model failure, active-response interruption and the installed audio example.
 The public Session projection exposes the frozen Template digest but hides the
 stored creation options. Those snapshots and active-Turn model freezing also rely
-on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/8009e3663a394bedbb468f070760756e0f091001/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
+on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/94c6905cfe5730454b101f66aa2f649446b4c008/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
 prove those hidden values.
 Usage cases seed controlled facts and verify both public projections, exact filters,
 paging and authority without executing messages to manufacture billing data.
