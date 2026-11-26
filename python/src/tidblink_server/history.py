@@ -51,6 +51,21 @@ class TurnUserFile(TypedDict):
     createdAt: str
 
 
+class FileNotificationRefusal(TypedDict):
+    """Why a File Notification announced nothing, and the path the Agent tried."""
+
+    #: ``not_found``, ``directory``, ``local_only`` (a folder such as ``build/``
+    #: that the Sandbox never saves to the Session's Drive), ``uploads``,
+    #: ``reserved``, ``skills``, ``invalid_path``, ``path_too_long``,
+    #: ``invalid_arguments``, ``limit_reached``, ``drain_failed`` (the Sandbox
+    #: could not save its pending writes) or ``unavailable``. The service may
+    #: add reasons: treat an unknown one as a generic refusal.
+    reason: str
+    #: Relative to the Session's Drive root when it resolves inside it,
+    #: otherwise as the Agent gave it. Absent when the Agent gave no usable path.
+    path: NotRequired[str]
+
+
 class OperationRecord(TypedDict):
     id: str
     sessionId: str
@@ -72,6 +87,8 @@ class OperationRecord(TypedDict):
     label: NotRequired[str]
     category: NotRequired[Literal["tool_call", "skill_read"]]
     skill: NotRequired[dict[str, str]]
+    #: On a failed ``file.notify`` Operation: why its File Notification announced nothing.
+    fileRefusal: NotRequired[FileNotificationRefusal]
     createdAt: str
     completedAt: NotRequired[str]
 

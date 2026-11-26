@@ -13,7 +13,7 @@ from typing import Any, Generic, Literal, NotRequired, TypedDict, TypeVar, Union
 
 from ._http import is_byte_size
 from .errors import TiDBLinkError
-from .history import ClarificationItem, RealtimeResponseKind
+from .history import ClarificationItem, FileNotificationRefusal, RealtimeResponseKind
 
 __all__ = [
     "SessionEvent",
@@ -123,6 +123,8 @@ class OperationStepPayload(TypedDict):
     source: NotRequired[dict[str, Any]]
     #: On the succeeded step of a File Notification: the file it announced.
     file: NotRequired[NotifiedFile]
+    #: On the failed step of a File Notification: why it announced nothing.
+    fileRefusal: NotRequired[FileNotificationRefusal]
 
 
 class ClientToolCallPayload(TypedDict):
@@ -370,6 +372,14 @@ def _is_notified_file(value: object) -> bool:
     )
 
 
+def _is_file_notification_refusal(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and _is_string(value.get("reason"))
+        and ("path" not in value or _is_string(value["path"]))
+    )
+
+
 def is_client_tool_calls_payload(payload: Mapping[str, Any]) -> bool:
     """Whether a ``client_tool_calls`` payload has the fields the SDK types."""
     calls = payload.get("calls")
@@ -395,6 +405,7 @@ def _is_known_turn_payload(name: str, payload: Mapping[str, Any], type_: str) ->
             and _is_string(payload.get("status"))
             and _is_string(payload.get("label"))
             and ("file" not in payload or _is_notified_file(payload["file"]))
+            and ("fileRefusal" not in payload or _is_file_notification_refusal(payload["fileRefusal"]))
         )
     if name == "client_tool_calls":
         return is_client_tool_calls_payload(payload)

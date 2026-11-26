@@ -527,11 +527,12 @@ process that keeps no connection, for example to recover a result after a restar
 
 `asKnownSessionEvent(event)` narrows an event to the types the SDK knows: Turn
 lifecycle, drafts, progress, saved messages and Operation steps, including the
-`file` a File Notification announces, Client Tool calls, Realtime transcripts
+`file` a File Notification announces or the `fileRefusal` of one the Agent
+could not make, Client Tool calls, Realtime transcripts
 and responses, Template switches and `agent.session.idle`. It returns
 `undefined` for anything else, which is still delivered unchanged, and for a
 known type whose data lacks the fields the SDK types, such as a malformed
-`file`. A draft (`agent.session.turn.output_text.snapshot`) is a
+`file` or `fileRefusal`. A draft (`agent.session.turn.output_text.snapshot`) is a
 complete snapshot: replace what you showed, including with an empty reset.
 
 ## Connecting a Session
@@ -1130,12 +1131,24 @@ time. A File Notification asks for no reply. A resumed cursor replays it, and a
 later Turn read keeps it as the `file.notify` Operation's `resultPointer` with
 `kind: "file_notification"`.
 
+When the Agent cannot announce a file, the tool's failed Operation step
+carries `fileRefusal`, `{ reason, path? }` (`FileNotificationRefusal`), instead
+of `file`, and `onFile` does not run; read it in `onEvent` with
+`asKnownSessionEvent`. A later Turn read keeps it on the failed `file.notify`
+Operation. `path` is the path the Agent tried, relative to the Session's Drive
+root when it resolves inside it, and absent when the Agent gave no usable one.
+`reason` is one of `not_found`, `directory`, `local_only`, `uploads`,
+`reserved`, `skills`, `invalid_path`, `path_too_long`, `invalid_arguments`,
+`limit_reached`, `drain_failed` (the Sandbox could not save its pending
+writes) or `unavailable`. The service may add reasons: treat an unknown one as
+a generic refusal.
+
 Only files in the Session's Drive can be announced. `build/`, `dist/`,
 `target/`, `tmp/` and similar folders, such as `node_modules/` and `.venv/`,
-stay in the Sandbox and never reach the Drive, so `notify_file` cannot announce
-a file there. Tell the model in the Template's instructions to build files it
-hands over into a synced folder such as `out/` or `firmware/`, for example
-with `-o out/firmware.bin`.
+stay in the Sandbox and never reach the Drive, so `notify_file` refuses a file
+there with `local_only`. Tell the model in the Template's instructions to build
+files it hands over into a synced folder such as `out/` or `firmware/`, for
+example with `-o out/firmware.bin`.
 
 The file stays in the Session's Drive, where the Agent may change it, and
 becomes unreadable once the Session is deleted. `session.files` reads it by

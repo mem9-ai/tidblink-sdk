@@ -37,6 +37,15 @@
 - Turn reads type the `file.notify` Operation kind and its
   `file_notification` result pointer. The audio Turn's `operation_step` event
   type carries the same optional `file`.
+- A File Notification the Agent could not make says why: its failed
+  `operation_step` and the failed `file.notify` Operation in Turn reads carry
+  `fileRefusal`, `{ reason, path? }` (`FileNotificationRefusal`), with a
+  `reason` such as `not_found`, `directory` or `local_only` (a folder such as
+  `build/` that the Sandbox never saves) and the path the Agent tried. The
+  service may add reasons. `asKnownSessionEvent` (`as_known_session_event`)
+  accepts the optional `fileRefusal` and does not narrow an event whose
+  `fileRefusal` is malformed; `onFile` does not run for it. The audio Turn's
+  `operation_step` event type carries the same optional `fileRefusal`.
 - The packaged `flash-device.mjs` example (`examples/flash_device.py` in
   Python) is the notify-then-Client-Tool device scenario: its `flash_device`
   Client Tool hands the device a keyless ticket for the announced version, and

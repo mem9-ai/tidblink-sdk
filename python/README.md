@@ -187,6 +187,11 @@ answers them.
 `on_file` receives each file the Agent announces with a File Notification, as
 the service's `{"path", "name", "version", "byteSize", "updatedAt"}` dict
 (`NotifiedFile`); see [Files in a Session's Drive](#files-in-a-sessions-drive).
+A File Notification the Agent could not make has no `file`: its failed
+`operation_step` carries `fileRefusal`, `{"reason", "path"?}`
+(`FileNotificationRefusal`), which `as_known_session_event` checks in
+`on_event`, and the failed `file.notify` Operation in Turn reads carries the
+same. Treat an unknown `reason` as a generic refusal.
 
 Callbacks may be plain functions or coroutines. They run one event at a time;
 an exception in one goes to `on_error`, or else to the event loop's exception
@@ -217,7 +222,8 @@ service answers with, without the API Key. `version` is opaque: an empty
 service judges the rest.
 
 Only files in the Session's Drive can be announced: `build/`, `dist/`,
-`target/`, `tmp/` and similar folders stay in the Sandbox. Tell the model in the
+`target/`, `tmp/` and similar folders stay in the Sandbox, and `notify_file`
+refuses a file there with `local_only`. Tell the model in the
 Template's instructions to build files it hands over into a synced folder such
 as `out/` or `firmware/`.
 

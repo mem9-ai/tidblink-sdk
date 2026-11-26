@@ -150,6 +150,7 @@ from .errors import (
     TurnWaitTimeoutError,
 )
 from .history import (
+    FileNotificationRefusal,
     OperationRecord,
     OperationStatus,
     RealtimeResponseKind,
@@ -344,6 +345,7 @@ __all__ = [
     "TurnItemAddedEvent",
     "OperationStepPayload",
     "NotifiedFile",
+    "FileNotificationRefusal",
     "TurnRequiresActionEvent",
     "ClientToolCallPayload",
     "TurnCompletedEvent",

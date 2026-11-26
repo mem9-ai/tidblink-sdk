@@ -175,3 +175,33 @@ def test_an_operation_step_of_a_file_notification_narrows_with_its_file_and_a_ma
     explicit_null = notify_step()
     explicit_null["data"]["payload"]["file"] = None
     assert as_known_session_event(explicit_null) is None
+
+
+def refused_notify_step(file_refusal: Any) -> Any:
+    payload = {
+        "operationId": "op_notify",
+        "status": "failed",
+        "label": "Failed notifying file",
+        "category": "tool_call",
+        "fileRefusal": file_refusal,
+    }
+    return with_cursor("c", envelope("agent.session.turn.item.added", turn_data("operation_step", payload)))
+
+
+def test_the_failed_operation_step_of_a_file_notification_narrows_with_its_refusal_and_a_malformed_refusal_is_not_narrowed() -> None:
+    refusal = {"reason": "local_only", "path": "build/firmware.bin"}
+    known = as_known_session_event(refused_notify_step(refusal))
+    assert known is not None and known["data"]["payload"]["fileRefusal"] == refusal
+    # The Agent may give no usable path, and the service may add reasons.
+    for accepted in [{"reason": "invalid_path"}, {"reason": "a_future_reason"}]:
+        known = as_known_session_event(refused_notify_step(accepted))
+        assert known is not None and known["data"]["payload"]["fileRefusal"] == accepted
+    for malformed in [
+        None,
+        "local_only",
+        {},
+        {"reason": 7},
+        {"reason": "not_found", "path": None},
+        {"reason": "not_found", "path": 7},
+    ]:
+        assert as_known_session_event(refused_notify_step(malformed)) is None, malformed

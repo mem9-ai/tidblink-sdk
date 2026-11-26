@@ -6,7 +6,7 @@ import {
   type ListOptions,
 } from "./http.js";
 import type { RequestOptions } from "./organization.js";
-import type { NotifiedFile } from "./events.js";
+import type { FileNotificationRefusal, NotifiedFile } from "./events.js";
 import type { BillingTag, ClarificationItem } from "./session.js";
 
 export type TurnStatus = "running" | "succeeded" | "failed" | "interrupted";
@@ -193,6 +193,8 @@ export interface OperationRecord {
   label?: string;
   category?: "tool_call" | "skill_read";
   skill?: { skillId: string; name: string };
+  /** On a failed `file.notify` Operation: why its File Notification announced nothing. */
+  fileRefusal?: FileNotificationRefusal;
   createdAt: string;
   completedAt?: string;
 }

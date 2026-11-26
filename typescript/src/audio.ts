@@ -13,6 +13,7 @@ import type { OperationRecord, TurnFailure } from "./history.js";
 import {
   isClientToolCallsPayload,
   type ClientToolCallPayload,
+  type FileNotificationRefusal,
   type NotifiedFile,
 } from "./events.js";
 import type { RequestOptions } from "./organization.js";
@@ -52,6 +53,8 @@ export type AudioTurnEvent =
         source?: OperationRecord["source"];
         /** On the succeeded step of a File Notification: the file it announced. */
         file?: NotifiedFile;
+        /** On the failed step of a File Notification: why it announced nothing. */
+        fileRefusal?: FileNotificationRefusal;
       }
     >
   | AudioEnvelope<

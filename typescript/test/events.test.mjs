@@ -173,3 +173,34 @@ test("an Operation step of a File Notification narrows with its file, and a malf
   ])
     assert.equal(asKnownSessionEvent(step(malformed)), undefined, JSON.stringify(malformed));
 });
+
+test("the failed Operation step of a File Notification narrows with its refusal, and a malformed refusal is not narrowed", () => {
+  const step = (fileRefusal) =>
+    withCursor(
+      "c",
+      envelope(
+        "agent.session.turn.item.added",
+        turnData("operation_step", {
+          operationId: "op_notify",
+          status: "failed",
+          label: "Failed notifying file",
+          category: "tool_call",
+          fileRefusal,
+        }),
+      ),
+    );
+  const refusal = { reason: "local_only", path: "build/firmware.bin" };
+  assert.deepEqual(asKnownSessionEvent(step(refusal))?.data.payload.fileRefusal, refusal);
+  // The Agent may give no usable path, and the service may add reasons.
+  for (const accepted of [{ reason: "invalid_path" }, { reason: "a_future_reason" }])
+    assert.deepEqual(asKnownSessionEvent(step(accepted))?.data.payload.fileRefusal, accepted);
+  for (const malformed of [
+    null,
+    "local_only",
+    {},
+    { reason: 7 },
+    { reason: "not_found", path: null },
+    { reason: "not_found", path: 7 },
+  ])
+    assert.equal(asKnownSessionEvent(step(malformed)), undefined, JSON.stringify(malformed));
+});

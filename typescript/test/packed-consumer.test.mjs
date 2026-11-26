@@ -117,7 +117,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       Template, TemplateContent, TemplateCatalog, TemplatePage, SkillUpload, SkillDetail,
       KnownSessionEvent,
       Connector, ServeConnectorOptions, ServedConnector, ServedConnectorEnd,
-      NotifiedFile, SessionDriveFiles, SessionDriveFileReadOptions, SessionDriveFileTicket,
+      NotifiedFile, FileNotificationRefusal, SessionDriveFiles, SessionDriveFileReadOptions, SessionDriveFileTicket,
       OperationResultPointer,
     } from "@tidblink/server";
     import {
@@ -250,7 +250,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
         },
         onEvent: (event: SessionEvent) => {
           const known: KnownSessionEvent | undefined = asKnownSessionEvent(event);
-          if (known?.type === "agent.session.turn.item.added" && known.data.event === "operation_step") { const file: NotifiedFile | undefined = known.data.payload.file; void file; }
+          if (known?.type === "agent.session.turn.item.added" && known.data.event === "operation_step") { const file: NotifiedFile | undefined = known.data.payload.file; const refusal: FileNotificationRefusal | undefined = known.data.payload.fileRefusal; void file; void refusal; }
           if (known?.type === "agent.session.turn.requires_action") { const callId: string = known.data.payload.calls[0]!.callId; void callId; }
           if (known?.type === "agent.session.idle") { const idle: SessionIdleEvent = known; const turnId: string | null = idle.data.turnId; void turnId; }
         },
@@ -273,6 +273,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       for (const operation of turn.operations) {
         const pointer: OperationResultPointer | null | undefined = operation.resultPointer;
         if (operation.kind === "file.notify" && pointer?.kind === "file_notification") { const version: string = pointer.version; void version; }
+        if (operation.kind === "file.notify" && operation.fileRefusal) { const reason: string = operation.fileRefusal.reason; const tried: string | undefined = operation.fileRefusal.path; void reason; void tried; }
       }
       // @ts-expect-error A Session file read has no other options.
       await files.read("a.bin", { ifMatch: "x" });

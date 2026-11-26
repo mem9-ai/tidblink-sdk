@@ -178,6 +178,8 @@ export type {
   TurnItemAddedEvent,
   OperationStepPayload,
   NotifiedFile,
+  FileNotificationRefusal,
+  FileNotificationRefusalReason,
   TurnRequiresActionEvent,
   ClientToolCallPayload,
   TurnCompletedEvent,
