@@ -1,4 +1,4 @@
-import { HttpClient, requireKnownKeys } from "./http.js";
+import { HttpClient, mediaType, requireKnownKeys } from "./http.js";
 import {
   OutcomeUnknownError,
   TiDBLinkApiError,
@@ -173,11 +173,7 @@ export async function* streamAudio(
     ));
     if (
       response.status !== 201 ||
-      response.headers
-        .get("content-type")
-        ?.split(";")[0]
-        ?.trim()
-        .toLowerCase() !== "text/event-stream" ||
+      mediaType(response) !== "text/event-stream" ||
       !response.body
     )
       throw new TiDBLinkError("Audio response omitted its event stream");

@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Generic, Literal, NotRequired, TypedDict, TypeVar, Union
 
+from ._http import is_byte_size
 from .errors import TiDBLinkError
 from .history import ClarificationItem, RealtimeResponseKind
 
@@ -359,14 +360,11 @@ _FINISHED_STATUS = {
 def _is_notified_file(value: object) -> bool:
     if not isinstance(value, dict):
         return False
-    size = value.get("byteSize")
     return (
         _is_string(value.get("path"))
         and _is_string(value.get("name"))
         and _is_string(value.get("version"))
-        and isinstance(size, int)
-        and not isinstance(size, bool)
-        and size >= 0
+        and is_byte_size(value.get("byteSize"))
         and "updatedAt" in value
         and (value["updatedAt"] is None or _is_string(value["updatedAt"]))
     )

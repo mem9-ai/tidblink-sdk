@@ -1,5 +1,6 @@
 import type { TemplateSwitchStatus } from "./template-switch.js";
 import { TiDBLinkError } from "./errors.js";
+import { isByteSize } from "./http.js";
 import type { ClarificationItem } from "./session.js";
 import type { RealtimeResponseKind, SessionRealtimeEvent } from "./history.js";
 
@@ -213,8 +214,7 @@ const isNotifiedFile = (value: unknown): value is NotifiedFile =>
   isString(value.path) &&
   isString(value.name) &&
   isString(value.version) &&
-  Number.isSafeInteger(value.byteSize) &&
-  (value.byteSize as number) >= 0 &&
+  isByteSize(value.byteSize) &&
   (value.updatedAt === null || isString(value.updatedAt));
 
 /** Whether a `client_tool_calls` payload has the fields the SDK types. */

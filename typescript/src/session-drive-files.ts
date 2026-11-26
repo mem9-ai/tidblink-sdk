@@ -1,6 +1,12 @@
 import { ConnectionError, TiDBLinkError } from "./errors.js";
 import { fetchDownload } from "./files.js";
-import { apiErrorFrom, HttpClient, requireKnownKeys } from "./http.js";
+import {
+  apiErrorFrom,
+  HttpClient,
+  isByteSize,
+  mediaType,
+  requireKnownKeys,
+} from "./http.js";
 import type { RequestOptions } from "./organization.js";
 
 export interface SessionDriveFileReadOptions extends RequestOptions {
@@ -98,8 +104,7 @@ export class SessionDriveFiles {
     if (
       typeof ticket?.url !== "string" ||
       !ticket.url ||
-      !Number.isSafeInteger(ticket.byteSize) ||
-      (ticket.byteSize as number) < 0 ||
+      !isByteSize(ticket.byteSize) ||
       typeof ticket.expiresAt !== "string" ||
       !Number.isFinite(Date.parse(ticket.expiresAt))
     )
@@ -110,7 +115,7 @@ export class SessionDriveFiles {
     return {
       url: this.#http.resolveUrl(ticket.url).toString(),
       expiresAt: ticket.expiresAt,
-      byteSize: ticket.byteSize as number,
+      byteSize: ticket.byteSize,
     };
   }
 
@@ -118,9 +123,6 @@ export class SessionDriveFiles {
     return `/sessions/${encodeURIComponent(this.#sessionId)}/files`;
   }
 }
-
-const mediaType = (response: Response): string | undefined =>
-  response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
 
 const bytesOf = async (
   response: Response,

@@ -273,6 +273,14 @@ export const requestOptions = (
   return { ...options };
 };
 
+/** A byte count the service reported: a non-negative safe integer. */
+export const isByteSize = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) >= 0;
+
+/** The response's media type, lowercased and without parameters. */
+export const mediaType = (response: Response): string | undefined =>
+  response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+
 /** Check the frozen wire grammar without retaining or exposing the credential. */
 export const isOrganizationApiKey = (value: unknown): value is string =>
   typeof value === "string" &&

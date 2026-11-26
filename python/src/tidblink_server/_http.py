@@ -112,6 +112,16 @@ def require_known_keys(value: object, allowed: tuple[str, ...], label: str) -> d
     return dict(value)
 
 
+def is_byte_size(value: object) -> bool:
+    """A byte count the service reported: a non-negative integer, not a bool."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def media_type(response: httpx.Response) -> str:
+    """The response's media type, lowercased and without parameters; empty without one."""
+    return (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+
+
 def is_organization_api_key(value: object) -> bool:
     """Check the frozen wire grammar without retaining or exposing the credential."""
     return isinstance(value, str) and bool(_ORGANIZATION_API_KEY.fullmatch(value))

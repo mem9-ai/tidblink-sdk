@@ -508,34 +508,26 @@ export class SessionConnection {
   }
 }
 
+/** The `connect()` options that are callbacks. */
+const CALLBACKS = [
+  "onCursor",
+  "onEvent",
+  "onTranscript",
+  "onResponse",
+  "onFile",
+  "onError",
+] as const;
+
 /** Check `connect()` options and turn tool handlers into declarations. */
 export function connectDeclarations(
   options: ConnectOptions,
 ): ClientToolDeclaration[] | undefined {
   requireKnownKeys(
     options,
-    [
-      "tools",
-      "observe",
-      "cursor",
-      "maxBufferedBytes",
-      "onCursor",
-      "onEvent",
-      "onTranscript",
-      "onResponse",
-      "onFile",
-      "onError",
-    ],
+    ["tools", "observe", "cursor", "maxBufferedBytes", ...CALLBACKS],
     "Session connection options",
   );
-  for (const key of [
-    "onCursor",
-    "onEvent",
-    "onTranscript",
-    "onResponse",
-    "onFile",
-    "onError",
-  ] as const)
+  for (const key of CALLBACKS)
     if (options[key] !== undefined && typeof options[key] !== "function")
       throw new TypeError(`${key} must be a function`);
   if (

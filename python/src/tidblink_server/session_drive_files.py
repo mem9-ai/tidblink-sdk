@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any, TypedDict
 
 import httpx
 
-from ._http import HttpClient, api_error_from, query_string, segment
+from ._http import HttpClient, api_error_from, is_byte_size, media_type, query_string, segment
 from .errors import TiDBLinkConnectionError, TiDBLinkError
-from .files import fetch_download
+from .files import fetch_download, parse_time
 
 __all__ = ["SessionDriveFiles", "SessionDriveFileTicket"]
 
@@ -42,16 +41,6 @@ def _require_file(path: object, version: object) -> None:
             raise TypeError("A Session file version must be text")
         if not version:
             raise ValueError("A Session file version must be the non-empty text a File Notification announced")
-
-
-def _is_time(value: object) -> bool:
-    if not isinstance(value, str):
-        return False
-    try:
-        datetime.fromisoformat(value)
-    except ValueError:
-        return False
-    return True
 
 
 async def _bytes_of(response: httpx.Response, request_id: str) -> bytes:
@@ -92,8 +81,7 @@ class SessionDriveFiles:
             request_id=request_id,
             retry="safe",
         )
-        content_type = response.headers.get("content-type") or ""
-        if content_type.split(";")[0].strip().lower() != _DOWNLOAD_TICKET_TYPE:
+        if media_type(response) != _DOWNLOAD_TICKET_TYPE:
             return await _bytes_of(response, stable_request_id)
         try:
             value: Any = json.loads(await response.aread())
@@ -134,19 +122,16 @@ class SessionDriveFiles:
         return self._ticket(result.data, result.request_id)
 
     def _ticket(self, value: Any, request_id: str) -> SessionDriveFileTicket:
-        size = value.get("byteSize") if isinstance(value, dict) else None
         if (
             not isinstance(value, dict)
             or not isinstance(value.get("url"), str)
             or not value["url"]
-            or not isinstance(size, int)
-            or isinstance(size, bool)
-            or size < 0
-            or not _is_time(value.get("expiresAt"))
+            or not is_byte_size(value.get("byteSize"))
+            or parse_time(value.get("expiresAt")) is None
         ):
             raise TiDBLinkError("Session file returned no usable download ticket", request_id=request_id)
         return {
             "url": self._http.resolve_url(value["url"]),
             "expiresAt": value["expiresAt"],
-            "byteSize": size,
+            "byteSize": value["byteSize"],
         }
