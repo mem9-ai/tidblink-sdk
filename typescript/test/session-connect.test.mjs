@@ -136,6 +136,7 @@ test("observing connections and resume cursors are sent as given; invalid option
     { observe: true, maxBufferedBytes: 1.5 },
     { maxBufferedBytes: 1024 },
     { onEvent: "nope" },
+    { onFile: {} },
     { unknown: true },
   ])
     await assert.rejects(session.connect(options), TypeError);
@@ -185,6 +186,69 @@ test("events arrive in order through their callbacks, and the cursor advances af
   assert.equal(errors.length, 2);
   assert.equal(errors[0].message, "application failure");
   assert(errors[1] instanceof TiDBLinkError);
+});
+
+test("onFile receives each file a File Notification announces, after onEvent and before the cursor", async () => {
+  const server = await start();
+  const seen = [];
+  const errors = [];
+  const conn = await sessionOf(server).connect({
+    onEvent: (event) => seen.push(["event", event.cursor]),
+    onFile: async (file) => {
+      await delay(5);
+      seen.push(["file", file]);
+      if (file.name === "broken.bin") throw new Error("application failure");
+    },
+    onCursor: (cursor) => seen.push(["cursor", cursor]),
+    onError: (error) => errors.push(error),
+  });
+  const firmware = {
+    path: "build/firmware.bin",
+    name: "firmware.bin",
+    version: "v1AAAAAAAAAAAAAAAAAAAA",
+    byteSize: 4,
+    updatedAt: createdAt,
+  };
+  const step = (cursor, payload) => ({
+    ...eventFrame(cursor, "agent.session.turn.item.added", {
+      event: "operation_step",
+      turnId: "turn_1",
+      sessionId: "sess_1",
+      seq: Number(cursor),
+      createdAt,
+      payload: {
+        operationId: `op_${cursor}`,
+        label: "Notifying file",
+        category: "tool_call",
+        ...payload,
+      },
+    }),
+  });
+  for (const frame of [
+    step("11", { status: "running" }),
+    step("12", { status: "succeeded", label: "Completed notifying file", file: firmware }),
+    step("13", { status: "succeeded", file: { ...firmware, byteSize: "4" } }),
+    step("14", { status: "succeeded", file: { ...firmware, name: "broken.bin" } }),
+  ]) {
+    frame.params.event.turnId = "turn_1";
+    server.peers[0].send(frame);
+  }
+  await until(() => conn.cursor === "14");
+  assert.deepEqual(seen, [
+    ["event", "11"],
+    ["cursor", "11"],
+    ["event", "12"],
+    ["file", firmware],
+    ["cursor", "12"],
+    // A malformed file reaches onEvent only.
+    ["event", "13"],
+    ["cursor", "13"],
+    ["event", "14"],
+    ["file", { ...firmware, name: "broken.bin" }],
+    ["cursor", "14"],
+  ]);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].message, "application failure");
 });
 
 test("after a lost connection the Session re-attaches from the last processed event and skips replays", async () => {

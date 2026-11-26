@@ -18,6 +18,7 @@ from ._types import OMIT, Omittable
 from .client_tools import ClientToolDeclaration, validate_client_tools
 from .errors import TiDBLinkApiError, TiDBLinkError
 from .events import (
+    NotifiedFile,
     RealtimeResponse,
     RealtimeTranscript,
     SessionEvent,
@@ -185,6 +186,7 @@ class SessionConnection:
         on_event: Callback | None,
         on_transcript: Callback | None,
         on_response: Callback | None,
+        on_file: Callback | None,
         max_buffered_bytes: int | None,
         on_error: Callable[[BaseException], None] | None,
     ) -> None:
@@ -201,6 +203,7 @@ class SessionConnection:
         self._on_event = on_event
         self._on_transcript = on_transcript
         self._on_response = on_response
+        self._on_file = on_file
         self._on_error = on_error
         self._max_buffered = (
             (max_buffered_bytes or DEFAULT_MAX_BUFFERED_BYTES) if observe else float("inf")
@@ -475,6 +478,14 @@ class SessionConnection:
         if known is not None and known["type"] == "agent.session.realtime.response.completed":
             response: RealtimeResponse = known["data"]  # type: ignore[assignment]
             await self._run(self._on_response, response)
+        if (
+            known is not None
+            and known["type"] == "agent.session.turn.item.added"
+            and known["data"]["event"] == "operation_step"
+            and "file" in known["data"]["payload"]
+        ):
+            file: NotifiedFile = known["data"]["payload"]["file"]  # type: ignore[typeddict-item]
+            await self._run(self._on_file, file)
         self._cursor = event["cursor"]
         for watcher in self._watchers:
             watcher.events.append(event)
@@ -585,6 +596,7 @@ async def connect_session(
     on_event: Callable[[SessionEvent], Awaitable[None] | None] | None = None,
     on_transcript: Callable[[RealtimeTranscript], Awaitable[None] | None] | None = None,
     on_response: Callable[[RealtimeResponse], Awaitable[None] | None] | None = None,
+    on_file: Callable[[NotifiedFile], Awaitable[None] | None] | None = None,
     max_buffered_bytes: int | None = None,
     on_error: Callable[[BaseException], None] | None = None,
 ) -> SessionConnection:
@@ -592,6 +604,9 @@ async def connect_session(
 
     ``on_cursor`` runs after each event's callbacks complete, with its cursor;
     persist it and pass it back as ``cursor`` to resume after that event.
+    ``on_file`` receives each file the Agent announces with a File
+    Notification, from the succeeded ``operation_step`` that carries it; read
+    it with ``session.files.read(file["path"], version=file["version"])``.
     ``max_buffered_bytes`` (observing connections only, default 8 MiB) bounds
     the event data, in bytes of the frames that carried it, that may wait for
     the callbacks; past it the connection stops taking events and, once the
@@ -614,6 +629,7 @@ async def connect_session(
             "on_event": on_event,
             "on_transcript": on_transcript,
             "on_response": on_response,
+            "on_file": on_file,
             "on_error": on_error,
         },
     )
@@ -630,6 +646,7 @@ async def connect_session(
         on_event=on_event,
         on_transcript=on_transcript,
         on_response=on_response,
+        on_file=on_file,
         max_buffered_bytes=max_buffered_bytes,
         on_error=on_error,
     )

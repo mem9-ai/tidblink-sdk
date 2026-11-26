@@ -25,6 +25,7 @@ import {
   type TemplateSwitchReceipt,
 } from "./template-switch.js";
 import type { RequestOptions } from "./organization.js";
+import { SessionDriveFiles } from "./session-drive-files.js";
 import {
   connectSession,
   type ConnectOptions,
@@ -170,6 +171,7 @@ export class Session {
   readonly id: string;
   #etag: string | undefined;
   #record: SessionRecord | undefined;
+  #files: SessionDriveFiles | undefined;
 
   constructor(
     http: HttpClient,
@@ -190,6 +192,14 @@ export class Session {
 
   get model(): SessionModel | undefined {
     return this.#record?.model;
+  }
+
+  /**
+   * Files in this Session's Drive, read by path, such as the files File
+   * Notifications announce.
+   */
+  get files(): SessionDriveFiles {
+    return (this.#files ??= new SessionDriveFiles(this.#http, this.id));
   }
 
   async refresh(options?: RequestOptions): Promise<this> {

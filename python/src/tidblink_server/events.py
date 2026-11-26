@@ -23,6 +23,7 @@ __all__ = [
     "TurnProgressEvent",
     "TurnItemAddedEvent",
     "OperationStepPayload",
+    "NotifiedFile",
     "TurnRequiresActionEvent",
     "ClientToolCallPayload",
     "TurnCompletedEvent",
@@ -93,6 +94,24 @@ class OperationStepSkill(TypedDict):
     name: str
 
 
+class NotifiedFile(TypedDict):
+    """One file the Agent announced in its Session's Drive with a File Notification.
+
+    The file stays in the Session's Drive and may change; read it pinned to
+    ``version`` with ``session.files.read(path, version=...)``.
+    """
+
+    #: Path relative to the Session's Drive root.
+    path: str
+    #: Display name, by default the path's last segment.
+    name: str
+    #: Opaque version the file had when announced.
+    version: str
+    byteSize: int
+    #: Last modification time, or None when storage reports none.
+    updatedAt: str | None
+
+
 class OperationStepPayload(TypedDict):
     operationId: str
     status: Literal["running", "succeeded", "failed", "interrupted", "unknown_result"]
@@ -101,6 +120,8 @@ class OperationStepPayload(TypedDict):
     skill: NotRequired[OperationStepSkill]
     #: ``{"type": "session_client"}``, or another source with more fields.
     source: NotRequired[dict[str, Any]]
+    #: On the succeeded step of a File Notification: the file it announced.
+    file: NotRequired[NotifiedFile]
 
 
 class ClientToolCallPayload(TypedDict):
@@ -335,6 +356,22 @@ _FINISHED_STATUS = {
 }
 
 
+def _is_notified_file(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    size = value.get("byteSize")
+    return (
+        _is_string(value.get("path"))
+        and _is_string(value.get("name"))
+        and _is_string(value.get("version"))
+        and isinstance(size, int)
+        and not isinstance(size, bool)
+        and size >= 0
+        and "updatedAt" in value
+        and (value["updatedAt"] is None or _is_string(value["updatedAt"]))
+    )
+
+
 def is_client_tool_calls_payload(payload: Mapping[str, Any]) -> bool:
     """Whether a ``client_tool_calls`` payload has the fields the SDK types."""
     calls = payload.get("calls")
@@ -359,6 +396,7 @@ def _is_known_turn_payload(name: str, payload: Mapping[str, Any], type_: str) ->
             _is_string(payload.get("operationId"))
             and _is_string(payload.get("status"))
             and _is_string(payload.get("label"))
+            and ("file" not in payload or _is_notified_file(payload["file"]))
         )
     if name == "client_tool_calls":
         return is_client_tool_calls_payload(payload)

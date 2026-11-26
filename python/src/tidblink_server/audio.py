@@ -37,7 +37,7 @@ from .errors import (
     TurnFailedError,
     TurnInterruptedError,
 )
-from .events import ClientToolCallsPayload, is_client_tool_calls_payload
+from .events import ClientToolCallsPayload, NotifiedFile, is_client_tool_calls_payload
 from .history import BillingTag, ClarificationItem, OperationStatus, TurnFailure
 from .turn import valid_clarification
 
@@ -90,6 +90,8 @@ class AudioOperationStepPayload(TypedDict):
     category: NotRequired[Literal["tool_call", "skill_read"]]
     skill: NotRequired[dict[str, str]]
     source: NotRequired[dict[str, Any]]
+    #: On the succeeded step of a File Notification: the file it announced.
+    file: NotRequired[NotifiedFile]
 
 
 class AudioAssistantMessagePayload(TypedDict):

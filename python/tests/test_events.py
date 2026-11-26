@@ -132,3 +132,46 @@ def test_session_event_from_checks_the_envelope_and_attaches_the_cursor() -> Non
     ]:
         with pytest.raises(TiDBLinkError, match="invalid envelope"):
             session_event_from(bad_value, cursor, session_id=session_id)
+
+
+NOTIFIED_FILE = {
+    "path": "build/firmware.bin",
+    "name": "firmware.bin",
+    "version": "Qm9vdHN0cmFwVmVyc2lvbg",
+    "byteSize": 1024,
+    "updatedAt": "2026-11-26T00:00:00.000Z",
+}
+
+
+def notify_step(file: Any = None) -> Any:
+    payload: dict[str, Any] = {
+        "operationId": "op_notify",
+        "status": "succeeded",
+        "label": "Completed notifying file",
+        "category": "tool_call",
+    }
+    if file is not None:
+        payload["file"] = file
+    return with_cursor("c", envelope("agent.session.turn.item.added", turn_data("operation_step", payload)))
+
+
+def test_an_operation_step_of_a_file_notification_narrows_with_its_file_and_a_malformed_file_is_not_narrowed() -> None:
+    known = as_known_session_event(notify_step(NOTIFIED_FILE))
+    assert known is not None and known["data"]["payload"]["file"] == NOTIFIED_FILE
+    # Storage may report no modification time.
+    assert as_known_session_event(notify_step({**NOTIFIED_FILE, "updatedAt": None})) is not None
+    for malformed in [
+        "build/firmware.bin",
+        {**NOTIFIED_FILE, "path": 7},
+        {key: value for key, value in NOTIFIED_FILE.items() if key != "name"},
+        {**NOTIFIED_FILE, "version": None},
+        {**NOTIFIED_FILE, "byteSize": -1},
+        {**NOTIFIED_FILE, "byteSize": 1.5},
+        {**NOTIFIED_FILE, "byteSize": True},
+        {**NOTIFIED_FILE, "byteSize": "1024"},
+        {**NOTIFIED_FILE, "updatedAt": 0},
+    ]:
+        assert as_known_session_event(notify_step(malformed)) is None, malformed
+    explicit_null = notify_step()
+    explicit_null["data"]["payload"]["file"] = None
+    assert as_known_session_event(explicit_null) is None

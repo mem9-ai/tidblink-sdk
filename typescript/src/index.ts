@@ -8,6 +8,7 @@ export {
   TiDBLinkApiError,
   TiDBLinkError,
   ConflictError,
+  DriveFileVersionConflictError,
   ConnectionError,
   TurnWaitTimeoutError,
   InputNotAppliedError,
@@ -80,6 +81,11 @@ export type {
 } from "./user.js";
 export type { ListOptions, FetchFunction } from "./http.js";
 export { Session } from "./session.js";
+export { SessionDriveFiles } from "./session-drive-files.js";
+export type {
+  SessionDriveFileReadOptions,
+  SessionDriveFileTicket,
+} from "./session-drive-files.js";
 export type {
   BillingTag,
   CreateSessionOptions,
@@ -171,6 +177,7 @@ export type {
   TurnProgressEvent,
   TurnItemAddedEvent,
   OperationStepPayload,
+  NotifiedFile,
   TurnRequiresActionEvent,
   ClientToolCallPayload,
   TurnCompletedEvent,

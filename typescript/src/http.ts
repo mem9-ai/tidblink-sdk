@@ -4,6 +4,7 @@ import {
   TiDBLinkError,
   ConflictError,
   ConnectionError,
+  DriveFileVersionConflictError,
   OutcomeUnknownError,
 } from "./errors.js";
 
@@ -224,6 +225,19 @@ const errorInput = async (
       ? { retryAfter: response.headers.get("retry-after")! }
       : {}),
   };
+};
+
+/** The service's error answer as an error: conflicts as `ConflictError` or a subclass. */
+export const apiErrorFrom = async (
+  response: Response,
+  fallbackRequestId: string,
+): Promise<TiDBLinkApiError> => {
+  const input = await errorInput(response, fallbackRequestId);
+  if (input.status === 409 && input.code === "drive_file_version_conflict")
+    return new DriveFileVersionConflictError(input);
+  return input.status === 409 || input.status === 412
+    ? new ConflictError(input)
+    : new TiDBLinkApiError(input);
 };
 
 export const normalizeBaseUrl = (value: string): string => {
@@ -563,21 +577,17 @@ export class HttpClient {
         continue;
       }
 
-      const input = await errorInput(response, stableRequestId);
-      const error =
-        input.status === 409 || input.status === 412
-          ? new ConflictError(input)
-          : new TiDBLinkApiError(input);
+      const error = await apiErrorFrom(response, stableRequestId);
       if (
         options.outcomeUnknown &&
-        (input.status >= 500 || input.status === 408)
+        (error.status >= 500 || error.status === 408)
       ) {
         throw new OutcomeUnknownError(
           "TiDB Link could not confirm the mutation outcome",
           {
-            ...(input.requestId === undefined
+            ...(error.requestId === undefined
               ? {}
-              : { requestId: input.requestId }),
+              : { requestId: error.requestId }),
             cause: error,
           },
         );

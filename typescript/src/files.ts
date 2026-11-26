@@ -217,7 +217,7 @@ const requireReady = (
   return file;
 };
 
-const requireActiveGrant = (expiresAt: string): void => {
+export const requireActiveGrant = (expiresAt: string): void => {
   if (
     !Number.isFinite(Date.parse(expiresAt)) ||
     Date.parse(expiresAt) <= Date.now()
@@ -240,6 +240,44 @@ const transferUrl = (url: URL): URL => {
       "File transfer URL must be HTTP(S) without embedded credentials or a fragment",
     );
   return url;
+};
+
+/**
+ * GET a download URL, which carries its own authority, without the API Key.
+ * One HTTPS redirect is followed.
+ */
+export const fetchDownload = async (
+  http: HttpClient,
+  url: string,
+  signal: AbortSignal | undefined,
+): Promise<Response> => {
+  let destination = transferUrl(http.resolveUrl(url));
+  signal?.throwIfAborted();
+  try {
+    let response = await http.fetch(destination, {
+      redirect: "manual",
+      ...(signal ? { signal } : {}),
+    });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      await response.body?.cancel();
+      if (!location)
+        throw new TiDBLinkError(
+          "File download redirect omitted its destination",
+        );
+      destination = transferUrl(new URL(location, destination));
+      if (destination.protocol !== "https:")
+        throw new TiDBLinkError("File download redirect requires HTTPS");
+      response = await http.fetch(destination, {
+        redirect: "error",
+        ...(signal ? { signal } : {}),
+      });
+    }
+    return response;
+  } catch (cause) {
+    if (cause instanceof TiDBLinkError) throw cause;
+    throw new ConnectionError("File download could not be reached");
+  }
 };
 
 export class UserFiles {
@@ -712,33 +750,7 @@ export class UserFiles {
   ): Promise<Uint8Array> {
     options = requestOptions(options);
     requireActiveGrant(grant.expiresAt);
-    let destination = transferUrl(this.#http.resolveUrl(grant.url));
-    options?.signal?.throwIfAborted();
-    let response: Response;
-    try {
-      response = await this.#http.fetch(destination, {
-        redirect: "manual",
-        ...(options?.signal ? { signal: options.signal } : {}),
-      });
-      if ([301, 302, 303, 307, 308].includes(response.status)) {
-        const location = response.headers.get("location");
-        await response.body?.cancel();
-        if (!location)
-          throw new TiDBLinkError(
-            "File download redirect omitted its destination",
-          );
-        destination = transferUrl(new URL(location, destination));
-        if (destination.protocol !== "https:")
-          throw new TiDBLinkError("File download redirect requires HTTPS");
-        response = await this.#http.fetch(destination, {
-          redirect: "error",
-          ...(options?.signal ? { signal: options.signal } : {}),
-        });
-      }
-    } catch (cause) {
-      if (cause instanceof TiDBLinkError) throw cause;
-      throw new ConnectionError("File download could not be reached");
-    }
+    const response = await fetchDownload(this.#http, grant.url, options.signal);
     if (!response.ok) {
       await response.body?.cancel();
       throw new TiDBLinkApiError({

@@ -27,6 +27,7 @@ from .events import (
     TurnProgressEvent,
     TurnItemAddedEvent,
     OperationStepPayload,
+    NotifiedFile,
     TurnRequiresActionEvent,
     ClientToolCallPayload,
     TurnCompletedEvent,
@@ -72,6 +73,10 @@ from .files import (
     FileContent,
     FileUploadError,
     FileUploadOutcomeUnknownError,
+)
+from .session_drive_files import (
+    SessionDriveFiles,
+    SessionDriveFileTicket,
 )
 from .skills import (
     Skills,
@@ -134,6 +139,7 @@ from .errors import (
     BackendConnectionClosedError,
     BackendRequestError,
     ConflictError,
+    DriveFileVersionConflictError,
     InputNotAppliedError,
     OutcomeUnknownError,
     TiDBLinkApiError,
@@ -232,6 +238,7 @@ __all__ = [
     "TiDBLinkError",
     "TiDBLinkApiError",
     "ConflictError",
+    "DriveFileVersionConflictError",
     "TiDBLinkConnectionError",
     "OutcomeUnknownError",
     "TurnWaitTimeoutError",
@@ -256,6 +263,8 @@ __all__ = [
     "UserFiles",
     "UserFile",
     "UserFileSource",
+    "SessionDriveFiles",
+    "SessionDriveFileTicket",
     "FileUploadCapabilities",
     "FileUpload",
     "FileUploadGrant",
@@ -334,6 +343,7 @@ __all__ = [
     "TurnProgressEvent",
     "TurnItemAddedEvent",
     "OperationStepPayload",
+    "NotifiedFile",
     "TurnRequiresActionEvent",
     "ClientToolCallPayload",
     "TurnCompletedEvent",
