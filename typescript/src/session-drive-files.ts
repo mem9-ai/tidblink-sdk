@@ -1,6 +1,17 @@
-import { ConnectionError, TiDBLinkError } from "./errors.js";
-import { fetchDownload, requireActiveGrant } from "./files.js";
-import { apiErrorFrom, HttpClient, requireKnownKeys } from "./http.js";
+import {
+  ConflictError,
+  ConnectionError,
+  DriveFileVersionConflictError,
+  TiDBLinkError,
+} from "./errors.js";
+import { fetchDownload } from "./files.js";
+import {
+  apiErrorFrom,
+  HttpClient,
+  isByteSize,
+  mediaType,
+  requireKnownKeys,
+} from "./http.js";
 import type { RequestOptions } from "./organization.js";
 
 export interface SessionDriveFileReadOptions extends RequestOptions {
@@ -25,7 +36,8 @@ export interface SessionDriveFileTicket {
 }
 
 const DOWNLOAD_TICKET_TYPE = "application/vnd.tidb-link.file-download+json";
-const VERSION = /^[A-Za-z0-9_-]{1,32}$/;
+/** The service's code for a file no longer at the version a read is pinned to. */
+const VERSION_CONFLICT = "drive_file_version_conflict";
 
 /**
  * Files in one Session's Drive, read by path, such as the path a File
@@ -48,12 +60,15 @@ export class SessionDriveFiles {
     path: string,
     options: SessionDriveFileReadOptions = {},
   ): Promise<Uint8Array> {
-    const { version, ...request } = fileOptions(path, options);
+    const { version, ...request } = validateFileRead(path, options);
     const query = new URLSearchParams({ path });
     if (version !== undefined) query.set("version", version);
-    const { response, requestId } = await this.#http.rawResponse(
-      `${this.#path}/content?${query}`,
-      { ...request, retry: "safe", headers: { accept: "*/*" } },
+    const { response, requestId } = await withVersionConflict(
+      this.#http.rawResponse(`${this.#path}/content?${query}`, {
+        ...request,
+        retry: "safe",
+        headers: { accept: "*/*" },
+      }),
     );
     if (mediaType(response) !== DOWNLOAD_TICKET_TYPE)
       return bytesOf(response, requestId);
@@ -63,10 +78,11 @@ export class SessionDriveFiles {
     } catch {
       value = undefined;
     }
+    // The service enforces the ticket's expiry; a client clock may be wrong.
     const ticket = this.#ticket(value, requestId);
-    requireActiveGrant(ticket.expiresAt);
     const download = await fetchDownload(this.#http, ticket.url, request.signal);
-    if (!download.ok) throw await apiErrorFrom(download, requestId);
+    if (!download.ok)
+      throw versionConflictFrom(await apiErrorFrom(download, requestId));
     const bytes = await bytesOf(download, requestId);
     if (bytes.byteLength !== ticket.byteSize)
       throw new TiDBLinkError(
@@ -85,11 +101,13 @@ export class SessionDriveFiles {
     path: string,
     options: SessionDriveFileReadOptions = {},
   ): Promise<SessionDriveFileTicket> {
-    const { version, ...request } = fileOptions(path, options);
-    const result = await this.#http.postResponse<unknown>(
-      `${this.#path}/download-tickets`,
-      version === undefined ? { path } : { path, version },
-      request,
+    const { version, ...request } = validateFileRead(path, options);
+    const result = await withVersionConflict(
+      this.#http.postResponse<unknown>(
+        `${this.#path}/download-tickets`,
+        version === undefined ? { path } : { path, version },
+        request,
+      ),
     );
     return this.#ticket(result.data, result.requestId);
   }
@@ -99,8 +117,7 @@ export class SessionDriveFiles {
     if (
       typeof ticket?.url !== "string" ||
       !ticket.url ||
-      !Number.isSafeInteger(ticket.byteSize) ||
-      (ticket.byteSize as number) < 0 ||
+      !isByteSize(ticket.byteSize) ||
       typeof ticket.expiresAt !== "string" ||
       !Number.isFinite(Date.parse(ticket.expiresAt))
     )
@@ -111,7 +128,7 @@ export class SessionDriveFiles {
     return {
       url: this.#http.resolveUrl(ticket.url).toString(),
       expiresAt: ticket.expiresAt,
-      byteSize: ticket.byteSize as number,
+      byteSize: ticket.byteSize,
     };
   }
 
@@ -120,8 +137,29 @@ export class SessionDriveFiles {
   }
 }
 
-const mediaType = (response: Response): string | undefined =>
-  response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+/** The service's version conflict as `DriveFileVersionConflictError`; any other error unchanged. */
+const versionConflictFrom = (error: unknown): unknown =>
+  error instanceof ConflictError &&
+  !(error instanceof DriveFileVersionConflictError) &&
+  error.status === 409 &&
+  error.code === VERSION_CONFLICT
+    ? new DriveFileVersionConflictError({
+        status: error.status,
+        code: error.code,
+        message: error.message,
+        ...(error.requestId === undefined ? {} : { requestId: error.requestId }),
+        ...(error.details === undefined ? {} : { details: error.details }),
+        ...(error.retryAfter === undefined
+          ? {}
+          : { retryAfter: error.retryAfter }),
+      })
+    : error;
+
+/** The request, with its version conflict as `DriveFileVersionConflictError`. */
+const withVersionConflict = <T>(request: Promise<T>): Promise<T> =>
+  request.catch((error: unknown) => {
+    throw versionConflictFrom(error);
+  });
 
 const bytesOf = async (
   response: Response,
@@ -137,7 +175,8 @@ const bytesOf = async (
   }
 };
 
-const fileOptions = (
+/** Check a read's or ticket's path and options before anything is sent. */
+const validateFileRead = (
   path: unknown,
   options: SessionDriveFileReadOptions,
 ): SessionDriveFileReadOptions => {
@@ -148,12 +187,13 @@ const fileOptions = (
   );
   if (typeof path !== "string" || !path)
     throw new TypeError("A Session file path must be non-empty text");
+  // The version is opaque: its form is the service's to judge.
   if (
     options.version !== undefined &&
-    (typeof options.version !== "string" || !VERSION.test(options.version))
+    (typeof options.version !== "string" || !options.version)
   )
     throw new TypeError(
-      "A Session file version must be the version a File Notification announced",
+      "A Session file version must be the non-empty text a File Notification announced",
     );
   return { ...options };
 };

@@ -4,7 +4,6 @@ import {
   TiDBLinkError,
   ConflictError,
   ConnectionError,
-  DriveFileVersionConflictError,
   OutcomeUnknownError,
 } from "./errors.js";
 
@@ -227,14 +226,12 @@ const errorInput = async (
   };
 };
 
-/** The service's error answer as an error: conflicts as `ConflictError` or a subclass. */
+/** The service's error answer as an error: explicit conflicts as `ConflictError`. */
 export const apiErrorFrom = async (
   response: Response,
   fallbackRequestId: string,
 ): Promise<TiDBLinkApiError> => {
   const input = await errorInput(response, fallbackRequestId);
-  if (input.status === 409 && input.code === "drive_file_version_conflict")
-    return new DriveFileVersionConflictError(input);
   return input.status === 409 || input.status === 412
     ? new ConflictError(input)
     : new TiDBLinkApiError(input);
@@ -272,6 +269,14 @@ export const requestOptions = (
   requireKnownKeys(options, ["requestId", "signal"], "Request options");
   return { ...options };
 };
+
+/** A byte count the service reported: a non-negative safe integer. */
+export const isByteSize = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) >= 0;
+
+/** The response's media type, lowercased and without parameters. */
+export const mediaType = (response: Response): string | undefined =>
+  response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
 
 /** Check the frozen wire grammar without retaining or exposing the credential. */
 export const isOrganizationApiKey = (value: unknown): value is string =>

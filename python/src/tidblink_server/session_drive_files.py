@@ -3,20 +3,28 @@
 from __future__ import annotations
 
 import json
-import re
-from datetime import datetime
-from typing import Any, TypedDict
+from collections.abc import Awaitable
+from typing import Any, TypedDict, TypeVar
 
 import httpx
 
-from ._http import HttpClient, api_error_from, query_string, segment
-from .errors import TiDBLinkConnectionError, TiDBLinkError
-from .files import fetch_download, require_active_grant
+from ._http import HttpClient, api_error_from, is_byte_size, media_type, query_string, segment
+from .errors import (
+    ConflictError,
+    DriveFileVersionConflictError,
+    TiDBLinkApiError,
+    TiDBLinkConnectionError,
+    TiDBLinkError,
+)
+from .files import fetch_download, parse_time
 
 __all__ = ["SessionDriveFiles", "SessionDriveFileTicket"]
 
 _DOWNLOAD_TICKET_TYPE = "application/vnd.tidb-link.file-download+json"
-_VERSION = re.compile(r"[A-Za-z0-9_-]{1,32}")
+#: The service's code for a file no longer at the version a read is pinned to.
+_VERSION_CONFLICT = "drive_file_version_conflict"
+
+_T = TypeVar("_T")
 
 
 class SessionDriveFileTicket(TypedDict):
@@ -33,26 +41,48 @@ class SessionDriveFileTicket(TypedDict):
     byteSize: int
 
 
-def _require_file(path: object, version: object) -> None:
+def _validate_file_read(path: object, version: object) -> None:
+    """Check a read's or ticket's path and version before anything is sent."""
     if not isinstance(path, str):
         raise TypeError("A Session file path must be text")
     if not path:
         raise ValueError("A Session file path must not be empty")
+    # The version is opaque: its form is the service's to judge.
     if version is not None:
         if not isinstance(version, str):
             raise TypeError("A Session file version must be text")
-        if not _VERSION.fullmatch(version):
-            raise ValueError("A Session file version must be the version a File Notification announced")
+        if not version:
+            raise ValueError("A Session file version must be the non-empty text a File Notification announced")
 
 
-def _is_time(value: object) -> bool:
-    if not isinstance(value, str):
-        return False
+def _version_conflict_from(error: TiDBLinkApiError) -> TiDBLinkApiError:
+    """The service's version conflict as :class:`DriveFileVersionConflictError`; any other error unchanged."""
+    if (
+        not isinstance(error, ConflictError)
+        or isinstance(error, DriveFileVersionConflictError)
+        or error.status != 409
+        or error.code != _VERSION_CONFLICT
+    ):
+        return error
+    return DriveFileVersionConflictError(
+        status=error.status,
+        code=error.code,
+        message=error.message,
+        request_id=error.request_id,
+        details=error.details,
+        retry_after=error.retry_after,
+    )
+
+
+async def _with_version_conflict(request: Awaitable[_T]) -> _T:
+    """The request, with its version conflict as :class:`DriveFileVersionConflictError`."""
     try:
-        datetime.fromisoformat(value)
-    except ValueError:
-        return False
-    return True
+        return await request
+    except TiDBLinkApiError as error:
+        conflict = _version_conflict_from(error)
+        if conflict is error:
+            raise
+        raise conflict from None
 
 
 async def _bytes_of(response: httpx.Response, request_id: str) -> bytes:
@@ -85,16 +115,17 @@ class SessionDriveFiles:
         are read. A file above the service's inline limit (50 MiB) is
         downloaded through the ticket the service answers with.
         """
-        _require_file(path, version)
+        _validate_file_read(path, version)
         query = query_string({"path": path, "version": version})
-        response, stable_request_id = await self._http.raw_response(
-            f"{self._path}/content{query}",
-            headers={"accept": "*/*"},
-            request_id=request_id,
-            retry="safe",
+        response, stable_request_id = await _with_version_conflict(
+            self._http.raw_response(
+                f"{self._path}/content{query}",
+                headers={"accept": "*/*"},
+                request_id=request_id,
+                retry="safe",
+            )
         )
-        content_type = response.headers.get("content-type") or ""
-        if content_type.split(";")[0].strip().lower() != _DOWNLOAD_TICKET_TYPE:
+        if media_type(response) != _DOWNLOAD_TICKET_TYPE:
             return await _bytes_of(response, stable_request_id)
         try:
             value: Any = json.loads(await response.aread())
@@ -102,12 +133,12 @@ class SessionDriveFiles:
             value = None
         finally:
             await response.aclose()
+        # The service enforces the ticket's expiry; a client clock may be wrong.
         ticket = self._ticket(value, stable_request_id)
-        require_active_grant(ticket["expiresAt"])
         download = await fetch_download(self._http, ticket["url"])
         if not download.is_success:
             try:
-                raise await api_error_from(download, stable_request_id)
+                raise _version_conflict_from(await api_error_from(download, stable_request_id))
             finally:
                 await download.aclose()
         data = await _bytes_of(download, stable_request_id)
@@ -125,29 +156,26 @@ class SessionDriveFiles:
         Pinned to ``version``, its download fails with a version conflict once
         the file has changed.
         """
-        _require_file(path, version)
+        _validate_file_read(path, version)
         body: dict[str, str] = {"path": path}
         if version is not None:
             body["version"] = version
-        result = await self._http.post_response(
-            f"{self._path}/download-tickets", body, request_id=request_id
+        result = await _with_version_conflict(
+            self._http.post_response(f"{self._path}/download-tickets", body, request_id=request_id)
         )
         return self._ticket(result.data, result.request_id)
 
     def _ticket(self, value: Any, request_id: str) -> SessionDriveFileTicket:
-        size = value.get("byteSize") if isinstance(value, dict) else None
         if (
             not isinstance(value, dict)
             or not isinstance(value.get("url"), str)
             or not value["url"]
-            or not isinstance(size, int)
-            or isinstance(size, bool)
-            or size < 0
-            or not _is_time(value.get("expiresAt"))
+            or not is_byte_size(value.get("byteSize"))
+            or parse_time(value.get("expiresAt")) is None
         ):
             raise TiDBLinkError("Session file returned no usable download ticket", request_id=request_id)
         return {
             "url": self._http.resolve_url(value["url"]),
             "expiresAt": value["expiresAt"],
-            "byteSize": size,
+            "byteSize": value["byteSize"],
         }

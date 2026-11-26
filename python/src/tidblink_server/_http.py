@@ -16,7 +16,6 @@ import httpx
 from ._types import OMIT, Omittable
 from .errors import (
     ConflictError,
-    DriveFileVersionConflictError,
     OutcomeUnknownError,
     TiDBLinkApiError,
     TiDBLinkConnectionError,
@@ -110,6 +109,16 @@ def require_known_keys(value: object, allowed: tuple[str, ...], label: str) -> d
         if key not in allowed:
             raise ValueError(f"{label}.{key} is not supported")
     return dict(value)
+
+
+def is_byte_size(value: object) -> bool:
+    """A byte count the service reported: a non-negative integer, not a bool."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def media_type(response: httpx.Response) -> str:
+    """The response's media type, lowercased and without parameters; empty without one."""
+    return (response.headers.get("content-type") or "").split(";")[0].strip().lower()
 
 
 def is_organization_api_key(value: object) -> bool:
@@ -285,10 +294,8 @@ async def _error_input(response: httpx.Response, fallback_request_id: str) -> di
 
 
 async def api_error_from(response: httpx.Response, fallback_request_id: str) -> TiDBLinkApiError:
-    """The service's error answer as an error: conflicts as :class:`ConflictError` or a subclass."""
+    """The service's error answer as an error: explicit conflicts as :class:`ConflictError`."""
     details = await _error_input(response, fallback_request_id)
-    if details["status"] == 409 and details["code"] == "drive_file_version_conflict":
-        return DriveFileVersionConflictError(**details)
     if details["status"] in (409, 412):
         return ConflictError(**details)
     return TiDBLinkApiError(**details)

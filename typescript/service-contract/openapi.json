@@ -4543,6 +4543,7 @@
                   "artifact_bytes_need_repair",
                   "drive_file_not_found",
                   "drive_file_version_conflict",
+                  "drive_file_too_large",
                   "drive_path_too_long",
                   "drive_download_rate_limited",
                   "drive_download_provider_error",

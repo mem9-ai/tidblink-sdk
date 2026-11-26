@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import {
   requestOptions,
   HttpClient,
+  isByteSize,
   isUnsentFailure,
   markUnsent,
+  mediaType,
   requireHashedLength,
   requireKnownKeys,
   unsentBody,
@@ -217,7 +219,7 @@ const requireReady = (
   return file;
 };
 
-export const requireActiveGrant = (expiresAt: string): void => {
+const requireActiveGrant = (expiresAt: string): void => {
   if (
     !Number.isFinite(Date.parse(expiresAt)) ||
     Date.parse(expiresAt) <= Date.now()
@@ -713,15 +715,11 @@ export class UserFiles {
     const contentType =
       response.headers.get("content-type") ?? "application/octet-stream";
     try {
-      if (
-        contentType.split(";")[0]?.trim().toLowerCase() ===
-        "application/vnd.tidb-link.file-download+json"
-      ) {
+      if (mediaType(response) === "application/vnd.tidb-link.file-download+json") {
         const grant: FileDownloadGrant = await response.json();
         if (
           !grant?.url ||
-          !Number.isSafeInteger(grant.byteSize) ||
-          grant.byteSize < 0 ||
+          !isByteSize(grant.byteSize) ||
           !/^[a-f0-9]{64}$/.test(grant.sha256) ||
           !Number.isFinite(Date.parse(grant.expiresAt))
         )

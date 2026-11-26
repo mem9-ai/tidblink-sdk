@@ -3,15 +3,17 @@
 ## Unreleased
 
 - Align with service
-  [8009e366](https://github.com/mem9-ai/agent-stack/commit/8009e3663a394bedbb468f070760756e0f091001),
+  [94c6905c](https://github.com/mem9-ai/agent-stack/commit/94c6905cfe5730454b101f66aa2f649446b4c008),
   OpenAPI SHA-256
-  `861b622236d74d3c6b697f0c2a2392ad7799f37154a7d32ce25c02847629b569`, which
+  `0c0c77a30558b9dc6930b468643349b55687c532316c4c04389ba69869ba33db`, which
   adds File Notifications and reads of files in a Session's Drive. The
   frozen files subset adds the Organization routes
   `sessions/{id}/files/content` and `sessions/{id}/files/download-tickets`.
-  The other subsets change only by the error code
-  `drive_file_version_conflict`, by the optional `file` of an `operation_step`
-  event, and by descriptions.
+  Otherwise the subsets change only by the error codes
+  `drive_file_version_conflict` and `drive_file_too_large`, by the optional
+  `file` of an `operation_step` event, and by descriptions.
+  `drive_file_too_large` is the Console's refusal to download a Template
+  Test's large file; no route the SDK calls answers it.
 - `session.connect({ onFile })` runs for each file the Agent announces with a
   File Notification: an `agent.session.turn.item.added` `operation_step` whose
   payload carries `file`, `{ path, name, version, byteSize, updatedAt }`
@@ -23,6 +25,8 @@
   follows the download ticket the service answers with, without the API Key.
   `createDownloadTicket(path, { version })` returns `{ url, expiresAt,
   byteSize }` with an absolute `url` that a device downloads without a key.
+  The `version` is opaque: the SDK sends any non-empty text as announced and
+  leaves its form to the service.
 - `DriveFileVersionConflictError`, a `ConflictError`, is raised when a pinned
   read, ticket or ticket download finds that the file has changed
   (`drive_file_version_conflict`). A missing file stays a 404
@@ -31,9 +35,10 @@
 - Turn reads type the `file.notify` Operation kind and its
   `file_notification` result pointer. The audio Turn's `operation_step` event
   type carries the same optional `file`.
-- The package README shows a notify-then-Client-Tool device example, where a
-  `flash_device` Client Tool hands the device a ticket for the announced
-  version.
+- The packaged `flash-device.mjs` example (`examples/flash_device.py` in
+  Python) is the notify-then-Client-Tool device scenario: its `flash_device`
+  Client Tool hands the device a keyless ticket for the announced version, and
+  the device's answer is the tool's result. The service verification runs it.
 - The Python SDK offers the same: `session.connect(on_file=...)`,
   `session.files.read(path, version=...)`,
   `session.files.create_download_ticket(path, version=...)`,
