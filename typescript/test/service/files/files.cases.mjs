@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
 import { test } from "node:test";
-import { OrganizationClient, TiDBLinkApiError } from "@tidblink/server";
+import {
+  ConflictError,
+  DriveFileVersionConflictError,
+  OrganizationClient,
+  TiDBLinkApiError,
+} from "@tidblink/server";
 import { uploadFileWorkflow } from "@tidblink/server/examples/upload-file.mjs";
 
 const baseUrl = process.env.SDK_SERVICE_URL;
@@ -202,4 +207,129 @@ test("the installed upload example includes file content in its conversation", a
   });
   assert.equal(result.file.status, "ready");
   assert(result.result.text.includes(unique), result.result.text);
+});
+
+test("a File Notification reaches onFile and its Client Tool reads the announced version, which a rewrite retires", async () => {
+  const organization = new OrganizationClient({
+    baseUrl,
+    apiKey: process.env.SDK_ORGANIZATION_KEY,
+  });
+  try {
+    const user = organization.user(process.env.SDK_USER_ID);
+    const session = await user.createSession({
+      templateId: process.env.SDK_TEMPLATE_ID,
+      idempotencyKey: randomUUID(),
+    });
+    const announced = [];
+    const flashed = [];
+    const conn = await session.connect({
+      tools: {
+        flash_device: {
+          description:
+            "Flash a firmware image onto the device. Call notify_file first and pass its path and version.",
+          parameters: {
+            type: "object",
+            properties: { path: { type: "string" }, version: { type: "string" } },
+            required: ["path", "version"],
+            additionalProperties: false,
+          },
+          run: async ({ path, version }) => {
+            const bytes = await session.files.read(path, { version });
+            const ticket = await session.files.createDownloadTicket(path, { version });
+            // The device downloads the ticket's URL without a key.
+            const download = await fetch(ticket.url);
+            flashed.push({
+              bytes: Buffer.from(bytes).toString(),
+              ticket,
+              download: { status: download.status, text: await download.text() },
+            });
+            return "flashed-ok";
+          },
+        },
+      },
+      onFile: (file) => announced.push(file),
+    });
+    const reply = await conn.send("SDK_FIXTURE_NOTIFY_FILE: build the firmware and flash it", {
+      timeoutMs: 30000,
+    });
+    assert.equal(reply.text, "Device answered: flashed-ok");
+    assert.equal(announced.length, 1);
+    const [file] = announced;
+    assert.deepEqual(
+      { ...file, version: undefined, updatedAt: undefined },
+      {
+        path: "builds/firmware.bin",
+        name: "Firmware 1",
+        version: undefined,
+        byteSize: "firmware v1".length,
+        updatedAt: undefined,
+      },
+    );
+    assert.match(file.version, /^[A-Za-z0-9_-]{1,32}$/);
+    assert.equal(flashed.length, 1);
+    assert.equal(flashed[0].bytes, "firmware v1");
+    assert.equal(flashed[0].ticket.byteSize, file.byteSize);
+    assert(flashed[0].ticket.url.startsWith(`${baseUrl}/api/v1/drive-downloads/`));
+    assert.deepEqual(flashed[0].download, { status: 200, text: "firmware v1" });
+    // A late reader recovers the announcement from the Turn's Operations.
+    const turn = await session.getTurn(reply.turnId);
+    assert.deepEqual(
+      turn.operations
+        .filter((operation) => operation.kind === "file.notify")
+        .map((operation) => operation.resultPointer),
+      [{ kind: "file_notification", ...file }],
+    );
+    await conn.close();
+
+    // Rewriting the file retires the announced version.
+    const rewrite = await fetch(
+      `${baseUrl}/api/v1/org/users/${process.env.SDK_USER_ID}/sessions/${session.id}/files`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${process.env.SDK_ORGANIZATION_KEY}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ path: file.path, content: "firmware v2" }),
+      },
+    );
+    assert.equal(rewrite.status, 201);
+    for (const pinned of [
+      session.files.read(file.path, { version: file.version }),
+      session.files.createDownloadTicket(file.path, { version: file.version }),
+    ])
+      await assert.rejects(
+        pinned,
+        (error) =>
+          error instanceof DriveFileVersionConflictError &&
+          error.code === "drive_file_version_conflict",
+      );
+    const stale = await fetch(flashed[0].ticket.url);
+    assert.equal(stale.status, 409);
+    assert.equal(
+      Buffer.from(await session.files.read(file.path)).toString(),
+      "firmware v2",
+    );
+    await assert.rejects(
+      session.files.read("builds/missing.bin"),
+      (error) =>
+        error instanceof TiDBLinkApiError &&
+        !(error instanceof ConflictError) &&
+        error.status === 404 &&
+        error.code === "drive_file_not_found",
+    );
+    // Another End User's handle cannot read this Session's Drive.
+    await assert.rejects(
+      organization
+        .user(process.env.SDK_FOREIGN_USER_ID)
+        .session(session.id)
+        .files.read(file.path),
+      (error) =>
+        error instanceof TiDBLinkApiError &&
+        error.status === 404 &&
+        error.code === "session_not_found",
+    );
+  } finally {
+    await organization.close();
+  }
 });

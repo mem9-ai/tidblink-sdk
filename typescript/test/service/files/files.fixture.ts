@@ -200,7 +200,45 @@ beforeAll(async () => {
     const selectedPath = JSON.stringify(context.messages).match(
       /\/home\/user\/uploads\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+/,
     )?.[0];
-    const content: AssistantMessage["content"] = toolResult
+    // Build a file, announce it with notify_file, then pass the announced
+    // path and version on to the application's flash_device Client Tool.
+    const notifyStep = (): AssistantMessage["content"] | undefined => {
+      if (!JSON.stringify(context.messages).includes("SDK_FIXTURE_NOTIFY_FILE"))
+        return undefined;
+      const text =
+        toolResult?.role === "toolResult"
+          ? toolResult.content
+              .map((part) => (part.type === "text" ? part.text : ""))
+              .join("")
+          : "";
+      const call = (name: string, args: Record<string, unknown>) => [
+        {
+          type: "toolCall" as const,
+          id: `sdk_${name}_${randomUUID().replaceAll("-", "")}`,
+          name,
+          arguments: args,
+        },
+      ];
+      if (toolResult?.role !== "toolResult")
+        return call("write_file", {
+          path: "builds/firmware.bin",
+          content: "firmware v1",
+        });
+      if (toolResult.toolName === "write_file")
+        return call("notify_file", {
+          path: "/home/user/workspace/builds/firmware.bin",
+          name: "Firmware 1",
+        });
+      if (toolResult.toolName === "notify_file") {
+        const { path: notified, version } = JSON.parse(text);
+        return call("flash_device", { path: notified, version });
+      }
+      return [{ type: "text", text: `Device answered: ${text}` }];
+    };
+    const notified = notifyStep();
+    const content: AssistantMessage["content"] = notified
+      ? notified
+      : toolResult
       ? [{ type: "text", text: JSON.stringify(toolResult.content) }]
       : selectedPath
         ? [
@@ -218,7 +256,9 @@ beforeAll(async () => {
       provider: model.provider,
       model: model.id,
       content,
-      stopReason: toolResult || !selectedPath ? "stop" : "toolUse",
+      stopReason: content.some((part) => part.type === "toolCall")
+        ? "toolUse"
+        : "stop",
       timestamp: 0,
       usage: {
         input: 1,
