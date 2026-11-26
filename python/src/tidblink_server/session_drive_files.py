@@ -3,17 +3,28 @@
 from __future__ import annotations
 
 import json
-from typing import Any, TypedDict
+from collections.abc import Awaitable
+from typing import Any, TypedDict, TypeVar
 
 import httpx
 
 from ._http import HttpClient, api_error_from, is_byte_size, media_type, query_string, segment
-from .errors import TiDBLinkConnectionError, TiDBLinkError
+from .errors import (
+    ConflictError,
+    DriveFileVersionConflictError,
+    TiDBLinkApiError,
+    TiDBLinkConnectionError,
+    TiDBLinkError,
+)
 from .files import fetch_download, parse_time
 
 __all__ = ["SessionDriveFiles", "SessionDriveFileTicket"]
 
 _DOWNLOAD_TICKET_TYPE = "application/vnd.tidb-link.file-download+json"
+#: The service's code for a file no longer at the version a read is pinned to.
+_VERSION_CONFLICT = "drive_file_version_conflict"
+
+_T = TypeVar("_T")
 
 
 class SessionDriveFileTicket(TypedDict):
@@ -42,6 +53,36 @@ def _validate_file_read(path: object, version: object) -> None:
             raise TypeError("A Session file version must be text")
         if not version:
             raise ValueError("A Session file version must be the non-empty text a File Notification announced")
+
+
+def _version_conflict_from(error: TiDBLinkApiError) -> TiDBLinkApiError:
+    """The service's version conflict as :class:`DriveFileVersionConflictError`; any other error unchanged."""
+    if (
+        not isinstance(error, ConflictError)
+        or isinstance(error, DriveFileVersionConflictError)
+        or error.status != 409
+        or error.code != _VERSION_CONFLICT
+    ):
+        return error
+    return DriveFileVersionConflictError(
+        status=error.status,
+        code=error.code,
+        message=error.message,
+        request_id=error.request_id,
+        details=error.details,
+        retry_after=error.retry_after,
+    )
+
+
+async def _with_version_conflict(request: Awaitable[_T]) -> _T:
+    """The request, with its version conflict as :class:`DriveFileVersionConflictError`."""
+    try:
+        return await request
+    except TiDBLinkApiError as error:
+        conflict = _version_conflict_from(error)
+        if conflict is error:
+            raise
+        raise conflict from None
 
 
 async def _bytes_of(response: httpx.Response, request_id: str) -> bytes:
@@ -76,11 +117,13 @@ class SessionDriveFiles:
         """
         _validate_file_read(path, version)
         query = query_string({"path": path, "version": version})
-        response, stable_request_id = await self._http.raw_response(
-            f"{self._path}/content{query}",
-            headers={"accept": "*/*"},
-            request_id=request_id,
-            retry="safe",
+        response, stable_request_id = await _with_version_conflict(
+            self._http.raw_response(
+                f"{self._path}/content{query}",
+                headers={"accept": "*/*"},
+                request_id=request_id,
+                retry="safe",
+            )
         )
         if media_type(response) != _DOWNLOAD_TICKET_TYPE:
             return await _bytes_of(response, stable_request_id)
@@ -95,7 +138,7 @@ class SessionDriveFiles:
         download = await fetch_download(self._http, ticket["url"])
         if not download.is_success:
             try:
-                raise await api_error_from(download, stable_request_id)
+                raise _version_conflict_from(await api_error_from(download, stable_request_id))
             finally:
                 await download.aclose()
         data = await _bytes_of(download, stable_request_id)
@@ -117,8 +160,8 @@ class SessionDriveFiles:
         body: dict[str, str] = {"path": path}
         if version is not None:
             body["version"] = version
-        result = await self._http.post_response(
-            f"{self._path}/download-tickets", body, request_id=request_id
+        result = await _with_version_conflict(
+            self._http.post_response(f"{self._path}/download-tickets", body, request_id=request_id)
         )
         return self._ticket(result.data, result.request_id)
 

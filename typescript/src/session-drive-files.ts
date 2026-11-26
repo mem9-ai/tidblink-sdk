@@ -1,4 +1,9 @@
-import { ConnectionError, TiDBLinkError } from "./errors.js";
+import {
+  ConflictError,
+  ConnectionError,
+  DriveFileVersionConflictError,
+  TiDBLinkError,
+} from "./errors.js";
 import { fetchDownload } from "./files.js";
 import {
   apiErrorFrom,
@@ -31,6 +36,8 @@ export interface SessionDriveFileTicket {
 }
 
 const DOWNLOAD_TICKET_TYPE = "application/vnd.tidb-link.file-download+json";
+/** The service's code for a file no longer at the version a read is pinned to. */
+const VERSION_CONFLICT = "drive_file_version_conflict";
 
 /**
  * Files in one Session's Drive, read by path, such as the path a File
@@ -56,9 +63,12 @@ export class SessionDriveFiles {
     const { version, ...request } = validateFileRead(path, options);
     const query = new URLSearchParams({ path });
     if (version !== undefined) query.set("version", version);
-    const { response, requestId } = await this.#http.rawResponse(
-      `${this.#path}/content?${query}`,
-      { ...request, retry: "safe", headers: { accept: "*/*" } },
+    const { response, requestId } = await withVersionConflict(
+      this.#http.rawResponse(`${this.#path}/content?${query}`, {
+        ...request,
+        retry: "safe",
+        headers: { accept: "*/*" },
+      }),
     );
     if (mediaType(response) !== DOWNLOAD_TICKET_TYPE)
       return bytesOf(response, requestId);
@@ -71,7 +81,8 @@ export class SessionDriveFiles {
     // The service enforces the ticket's expiry; a client clock may be wrong.
     const ticket = this.#ticket(value, requestId);
     const download = await fetchDownload(this.#http, ticket.url, request.signal);
-    if (!download.ok) throw await apiErrorFrom(download, requestId);
+    if (!download.ok)
+      throw versionConflictFrom(await apiErrorFrom(download, requestId));
     const bytes = await bytesOf(download, requestId);
     if (bytes.byteLength !== ticket.byteSize)
       throw new TiDBLinkError(
@@ -91,10 +102,12 @@ export class SessionDriveFiles {
     options: SessionDriveFileReadOptions = {},
   ): Promise<SessionDriveFileTicket> {
     const { version, ...request } = validateFileRead(path, options);
-    const result = await this.#http.postResponse<unknown>(
-      `${this.#path}/download-tickets`,
-      version === undefined ? { path } : { path, version },
-      request,
+    const result = await withVersionConflict(
+      this.#http.postResponse<unknown>(
+        `${this.#path}/download-tickets`,
+        version === undefined ? { path } : { path, version },
+        request,
+      ),
     );
     return this.#ticket(result.data, result.requestId);
   }
@@ -123,6 +136,30 @@ export class SessionDriveFiles {
     return `/sessions/${encodeURIComponent(this.#sessionId)}/files`;
   }
 }
+
+/** The service's version conflict as `DriveFileVersionConflictError`; any other error unchanged. */
+const versionConflictFrom = (error: unknown): unknown =>
+  error instanceof ConflictError &&
+  !(error instanceof DriveFileVersionConflictError) &&
+  error.status === 409 &&
+  error.code === VERSION_CONFLICT
+    ? new DriveFileVersionConflictError({
+        status: error.status,
+        code: error.code,
+        message: error.message,
+        ...(error.requestId === undefined ? {} : { requestId: error.requestId }),
+        ...(error.details === undefined ? {} : { details: error.details }),
+        ...(error.retryAfter === undefined
+          ? {}
+          : { retryAfter: error.retryAfter }),
+      })
+    : error;
+
+/** The request, with its version conflict as `DriveFileVersionConflictError`. */
+const withVersionConflict = <T>(request: Promise<T>): Promise<T> =>
+  request.catch((error: unknown) => {
+    throw versionConflictFrom(error);
+  });
 
 const bytesOf = async (
   response: Response,

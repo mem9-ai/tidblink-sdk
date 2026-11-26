@@ -16,7 +16,6 @@ import httpx
 from ._types import OMIT, Omittable
 from .errors import (
     ConflictError,
-    DriveFileVersionConflictError,
     OutcomeUnknownError,
     TiDBLinkApiError,
     TiDBLinkConnectionError,
@@ -295,10 +294,8 @@ async def _error_input(response: httpx.Response, fallback_request_id: str) -> di
 
 
 async def api_error_from(response: httpx.Response, fallback_request_id: str) -> TiDBLinkApiError:
-    """The service's error answer as an error: conflicts as :class:`ConflictError` or a subclass."""
+    """The service's error answer as an error: explicit conflicts as :class:`ConflictError`."""
     details = await _error_input(response, fallback_request_id)
-    if details["status"] == 409 and details["code"] == "drive_file_version_conflict":
-        return DriveFileVersionConflictError(**details)
     if details["status"] in (409, 412):
         return ConflictError(**details)
     return TiDBLinkApiError(**details)
