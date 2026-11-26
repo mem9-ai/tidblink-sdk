@@ -30,7 +30,8 @@ class SessionDriveFileTicket(TypedDict):
     byteSize: int
 
 
-def _require_file(path: object, version: object) -> None:
+def _validate_file_read(path: object, version: object) -> None:
+    """Check a read's or ticket's path and version before anything is sent."""
     if not isinstance(path, str):
         raise TypeError("A Session file path must be text")
     if not path:
@@ -73,7 +74,7 @@ class SessionDriveFiles:
         are read. A file above the service's inline limit (50 MiB) is
         downloaded through the ticket the service answers with.
         """
-        _require_file(path, version)
+        _validate_file_read(path, version)
         query = query_string({"path": path, "version": version})
         response, stable_request_id = await self._http.raw_response(
             f"{self._path}/content{query}",
@@ -112,7 +113,7 @@ class SessionDriveFiles:
         Pinned to ``version``, its download fails with a version conflict once
         the file has changed.
         """
-        _require_file(path, version)
+        _validate_file_read(path, version)
         body: dict[str, str] = {"path": path}
         if version is not None:
             body["version"] = version

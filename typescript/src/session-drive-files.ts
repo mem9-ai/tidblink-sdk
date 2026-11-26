@@ -53,7 +53,7 @@ export class SessionDriveFiles {
     path: string,
     options: SessionDriveFileReadOptions = {},
   ): Promise<Uint8Array> {
-    const { version, ...request } = fileOptions(path, options);
+    const { version, ...request } = validateFileRead(path, options);
     const query = new URLSearchParams({ path });
     if (version !== undefined) query.set("version", version);
     const { response, requestId } = await this.#http.rawResponse(
@@ -90,7 +90,7 @@ export class SessionDriveFiles {
     path: string,
     options: SessionDriveFileReadOptions = {},
   ): Promise<SessionDriveFileTicket> {
-    const { version, ...request } = fileOptions(path, options);
+    const { version, ...request } = validateFileRead(path, options);
     const result = await this.#http.postResponse<unknown>(
       `${this.#path}/download-tickets`,
       version === undefined ? { path } : { path, version },
@@ -138,7 +138,8 @@ const bytesOf = async (
   }
 };
 
-const fileOptions = (
+/** Check a read's or ticket's path and options before anything is sent. */
+const validateFileRead = (
   path: unknown,
   options: SessionDriveFileReadOptions,
 ): SessionDriveFileReadOptions => {
