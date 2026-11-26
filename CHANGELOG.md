@@ -39,6 +39,12 @@
   Python) is the notify-then-Client-Tool device scenario: its `flash_device`
   Client Tool hands the device a keyless ticket for the announced version, and
   the device's answer is the tool's result. The service verification runs it.
+  `flashDeviceWorkflow` (`flash_device_workflow`) sends the message and keeps
+  the device connected until the Turn ends, waiting up to 10 minutes by
+  default because a build can take minutes; the script reads the wait from
+  `TURN_TIMEOUT_SECONDS`. The READMEs say to build files the Agent hands over
+  into a synced folder such as `out/`, since `build/`, `dist/`, `target/` and
+  `tmp/` stay in the Sandbox.
 - The Python SDK offers the same: `session.connect(on_file=...)`,
   `session.files.read(path, version=...)`,
   `session.files.create_download_ticket(path, version=...)`,

@@ -618,9 +618,10 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
     const { createLampBackend, memoryStore } = await import("@tidblink/server/examples/lamp-backend.mjs");
     assert.equal(typeof createLampBackend, "function");
     assert.equal(typeof memoryStore, "function");
-    const { connectDeviceFlasher, downloadingDevice } = await import("@tidblink/server/examples/flash-device.mjs");
+    const { connectDeviceFlasher, downloadingDevice, flashDeviceWorkflow } = await import("@tidblink/server/examples/flash-device.mjs");
     assert.equal(typeof connectDeviceFlasher, "function");
     assert.equal(typeof downloadingDevice, "function");
+    assert.equal(typeof flashDeviceWorkflow, "function");
     const { createSessionWorkflow } = await import("@tidblink/server/examples/create-session.mjs");
     assert.equal(typeof createSessionWorkflow, "function");
     assert.equal(typeof prepareRealtimeConnection, "function");
