@@ -14,17 +14,25 @@ import httpx
 
 from backend_support import (  # noqa: F401
     API_KEY,
+    SAVED_TURN,
     Harness,
     Peer,
     by_method,
     deadline_in,
+    finished,
     harness,
+    idle,
     json_response,
+    methods,
+    receipt,
+    settled,
     until,
 )
-from examples.flash_device import DownloadingDevice, connect_device_flasher
+from examples.flash_device import DownloadingDevice, connect_device_flasher, flash_device_workflow
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "examples" / "flash_device.py"
+REPLY = "Built and flashed the firmware."
 SESSION_PATH = "/api/v1/org/users/user_1/sessions/sess_1"
 DOWNLOADS = "/api/v1/drive-downloads/ticket."
 AT = "2026-11-26T00:00:00.000Z"
@@ -71,6 +79,11 @@ def drive_service(drive: dict[str, dict[str, Any]], seen: list[tuple[str, str, s
             )
         if request.method == "GET" and path.startswith(DOWNLOADS):
             return httpx.Response(200, content=drive[unquote(path[len(DOWNLOADS) :])]["bytes"])
+        # The settled Turn of message msg_1.
+        if request.method == "GET" and path == f"{SESSION_PATH}/interactions/msg_1":
+            return json_response({"interaction": settled()})
+        if request.method == "GET" and path == f"{SESSION_PATH}/turns/turn_1":
+            return json_response({"turn": {**SAVED_TURN, "assistantMessage": {**SAVED_TURN["assistantMessage"], "content": REPLY}}})
         return httpx.Response(404)
 
     return handle
@@ -178,17 +191,117 @@ async def test_the_flash_device_example_announces_the_file_and_flashes_the_annou
     await conn.close()
 
 
-async def test_the_flash_device_script_names_a_missing_setting_before_connecting() -> None:
-    names = ("FIRMWARE_PATH", "MESSAGE_TEXT")
-    env = {key: value for key, value in os.environ.items() if key not in names}
+async def test_flash_device_workflow_keeps_the_device_connected_until_the_turn_ends_so_a_flash_device_call_late_in_the_build_reaches_it(
+    harness: Harness,
+) -> None:
+    drive = {FIRMWARE["path"]: {"version": "v1", "bytes": b"firmware v1"}}
+    service = drive_service(drive, [])
+    tasks: set[asyncio.Task[None]] = set()
+
+    def later(delay: float, *messages: dict[str, Any], peer: Peer) -> None:
+        async def run() -> None:
+            await asyncio.sleep(delay)
+            for message in messages:
+                peer.send(message)
+
+        tasks.add(asyncio.ensure_future(run()))
+
+    def turn(message: dict[str, Any], peer: Peer, index: int) -> Any:
+        if message["method"] == "session.send":
+            # The Agent builds for a while, announces the image, then calls the tool.
+            later(
+                0.2,
+                notified("11", FIRMWARE),
+                tool_call("call_1", {"path": FIRMWARE["path"], "version": FIRMWARE["version"]}),
+                peer=peer,
+            )
+            return {"result": {"interaction": receipt(), "replayed": False}}
+        if message["method"] == "tool.result":
+            later(0.02, finished("12"), idle("13"), peer=peer)
+        return respond(message, peer, index)
+
+    core = await harness.core(respond=turn)
+    session = harness.client(core, service).user("user_1").session("sess_1")
+    announced: list[Any] = []
+    flashed: list[bytes] = []
+    reply = await flash_device_workflow(
+        session,
+        DownloadingDevice(flashed.append, http_client=harness.http_client(service)),
+        "Build the firmware and flash it",
+        client_event_id="msg_1",
+        timeout=5,
+        on_file=announced.append,
+    )
+    assert reply.text == REPLY
+    assert announced == [FIRMWARE]
+    assert flashed == [b"firmware v1"]
+    peer = core.peers[0]
+    assert by_method(peer, "tool.result")[0]["params"] == {"callId": "call_1", "output": "Flashed 11 bytes"}
+    # Connected for the whole Turn, disconnected once it ended.
+    assert [m for m in methods(peer) if m != "ping"] == [
+        "session.attach",
+        "session.send",
+        "tool.claim",
+        "tool.result",
+        "session.detach",
+    ]
+
+
+async def run_script(env: dict[str, str]) -> tuple[int | None, bytes, bytes]:
+    names = ("FIRMWARE_PATH", "MESSAGE_TEXT", "TURN_TIMEOUT_SECONDS")
+    base = {key: value for key, value in os.environ.items() if key not in names}
     process = await asyncio.create_subprocess_exec(
         sys.executable,
-        str(ROOT / "examples" / "flash_device.py"),
-        env={**env, "PYTHONPATH": str(ROOT / "src")},
+        str(SCRIPT),
+        env={**base, "PYTHONPATH": str(ROOT / "src"), **env},
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await asyncio.wait_for(process.communicate(), 30)
-    assert process.returncode == 1
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), 20)
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+    return process.returncode, stdout, stderr
+
+
+async def test_the_flash_device_script_waits_turn_timeout_seconds_for_the_turn_then_says_how_to_wait_longer(
+    harness: Harness, tmp_path: Path
+) -> None:
+    def still_building(message: dict[str, Any], peer: Peer, index: int) -> Any:
+        if message["method"] == "session.send":
+            return {"result": {"interaction": receipt(), "replayed": False}}
+        return None
+
+    core = await harness.core(respond=still_building)
+    code, stdout, stderr = await run_script(
+        {
+            "AGENT_SERVICE_URL": core.base_url,
+            "ORGANIZATION_API_KEY": API_KEY,
+            "END_USER_ID": "user_1",
+            "SESSION_ID": "sess_1",
+            "MESSAGE_TEXT": "Build the firmware and flash it",
+            "CLIENT_EVENT_ID": "msg_1",
+            "FIRMWARE_PATH": str(tmp_path / "device.bin"),
+            "TURN_TIMEOUT_SECONDS": "1",
+        }
+    )
+    assert code == 1, stderr
+    assert stdout == b""
+    assert b"did not finish within 1 second" in stderr
+    assert b"TURN_TIMEOUT_SECONDS" in stderr
+    assert len(by_method(core.peers[0], "session.send")) == 1
+
+
+async def test_the_flash_device_script_names_a_missing_or_invalid_setting_before_connecting() -> None:
+    code, stdout, stderr = await run_script({})
+    assert code == 1
     assert stdout == b""
     assert b"Set FIRMWARE_PATH" in stderr
+    code, stdout, stderr = await run_script(
+        {"FIRMWARE_PATH": "device.bin", "MESSAGE_TEXT": "Build and flash", "TURN_TIMEOUT_SECONDS": "ten minutes"}
+    )
+    assert code == 1
+    assert stdout == b""
+    assert b"Set TURN_TIMEOUT_SECONDS" in stderr

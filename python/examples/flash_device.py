@@ -14,6 +14,9 @@ instructions.
   sees.
 - The device's answer is the tool's result, so the model can react in the
   same Turn, for example fix the build and flash again.
+- ``flash_device_workflow`` sends the message and keeps the device connected
+  until the Turn ends, waiting up to 10 minutes because a build can take
+  minutes. The script reads that wait from ``TURN_TIMEOUT_SECONDS``.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+import re
 import sys
 import uuid
 from collections.abc import Awaitable, Callable
@@ -36,6 +40,8 @@ from tidblink_server import (
     OrganizationClient,
     Session,
     SessionConnection,
+    TurnResult,
+    TurnWaitTimeoutError,
 )
 
 
@@ -58,7 +64,11 @@ async def connect_device_flasher(
     *,
     on_file: Callable[[NotifiedFile], Awaitable[None] | None] | None = None,
 ) -> SessionConnection:
-    """Connect the Session with the ``flash_device`` Client Tool; ``close()`` it when the device goes offline."""
+    """Connect the Session with the ``flash_device`` Client Tool; ``close()`` it when the device goes offline.
+
+    The device must stay connected until the Turn ends: a ``flash_device``
+    call made while no connection executes the Session fails as not delivered.
+    """
 
     async def flash_device(args: dict[str, Any], context: ClientToolCallContext) -> str:
         ticket = await session.files.create_download_ticket(args["path"], version=args["version"])
@@ -79,6 +89,30 @@ async def connect_device_flasher(
         },
         on_file=on_file,
     )
+
+
+async def flash_device_workflow(
+    session: Session,
+    device: Device,
+    text: str,
+    *,
+    client_event_id: str | None = None,
+    timeout: float = 600,
+    on_file: Callable[[NotifiedFile], Awaitable[None] | None] | None = None,
+) -> TurnResult:
+    """Send ``text``, which asks the Agent to build and flash, and keep the device connected until the Turn ends.
+
+    The Agent's ``flash_device`` calls reach the device until then; the
+    connection closes afterwards. A build can take minutes, so ``timeout``
+    defaults to 10 minutes instead of ``send()``'s 60 seconds. When it ends
+    first, ``TurnWaitTimeoutError`` is raised and the device disconnects; the
+    Turn goes on without it.
+    """
+    conn = await connect_device_flasher(session, device, on_file=on_file)
+    try:
+        return await conn.send(text, client_event_id=client_event_id, timeout=timeout)
+    finally:
+        await conn.close()
 
 
 class DownloadingDevice:
@@ -108,6 +142,8 @@ class DownloadingDevice:
 
 
 async def _main() -> int:
+    # How long the device stays connected for the Turn: 10 minutes unless set.
+    seconds = os.environ.get("TURN_TIMEOUT_SECONDS") or "600"
     try:
         firmware_path = os.environ.get("FIRMWARE_PATH")
         if not firmware_path:
@@ -115,22 +151,32 @@ async def _main() -> int:
         text = os.environ.get("MESSAGE_TEXT")
         if not text:
             raise ValueError("Set MESSAGE_TEXT to the message that asks the Agent to build and flash")
+        if not re.fullmatch(r"[1-9][0-9]{0,5}", seconds):
+            raise ValueError("Set TURN_TIMEOUT_SECONDS to a whole number of seconds, or unset it to wait 10 minutes")
         async with OrganizationClient(
             base_url=os.environ.get("AGENT_SERVICE_URL"),  # type: ignore[arg-type]
             api_key=os.environ.get("ORGANIZATION_API_KEY"),  # type: ignore[arg-type]
         ) as organization:
             session = organization.user(os.environ.get("END_USER_ID")).session(os.environ.get("SESSION_ID"))  # type: ignore[arg-type]
-            conn = await connect_device_flasher(
+            reply = await flash_device_workflow(
                 session,
                 DownloadingDevice(Path(firmware_path).write_bytes),
+                text,
+                client_event_id=os.environ.get("CLIENT_EVENT_ID") or str(uuid.uuid4()),
+                timeout=int(seconds),
                 on_file=lambda file: print(
                     f"The Agent announced {file['name']} ({file['byteSize']} bytes)", file=sys.stderr
                 ),
             )
-            reply = await conn.send(text, client_event_id=os.environ.get("CLIENT_EVENT_ID") or str(uuid.uuid4()))
             print(reply.text)
-            await conn.close()
         return 0
+    except TurnWaitTimeoutError:
+        print(
+            f"The Turn did not finish within {seconds} seconds. It goes on without the device, "
+            "whose flash_device calls now fail; set TURN_TIMEOUT_SECONDS to wait longer",
+            file=sys.stderr,
+        )
+        return 1
     except Exception as error:
         print(str(error) or "Flashing the device failed", file=sys.stderr)
         return 1

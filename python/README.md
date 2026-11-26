@@ -216,6 +216,11 @@ service answers with, without the API Key. `version` is opaque: an empty
 `path` or `version` raises `ValueError` before anything is sent, and the
 service judges the rest.
 
+Only files in the Session's Drive can be announced: `build/`, `dist/`,
+`target/`, `tmp/` and similar folders stay in the Sandbox. Tell the model in the
+Template's instructions to build files it hands over into a synced folder such
+as `out/` or `firmware/`.
+
 To have a device act on the file within the same Turn, declare a Client Tool
 that takes the path and version, and tell the model in the Template's
 instructions to call it after `notify_file`:
@@ -229,6 +234,16 @@ async def flash_device(args, context):  # cancelled at context.deadline_at
 [`examples/flash_device.py`](examples/flash_device.py) declares this tool in
 `connect_device_flasher(session, device, on_file=...)`, with
 `DownloadingDevice(save)` standing in for your device channel.
+
+Keep the device connected until the Turn ends: a call made while no connection
+executes the Session is reported to the model as not performed. A build can
+take minutes, longer than `send()`'s default 60-second wait, so pass a
+`timeout` that covers the build and close the connection only after `send()`
+returns. `flash_device_workflow(session, device, text, timeout=600)` does so:
+it connects, sends `text`, stays connected until the Turn ends and returns its
+result, or raises `TurnWaitTimeoutError` and disconnects when the wait ends
+first. Run as a script, the example reads that wait from
+`TURN_TIMEOUT_SECONDS` (default 600), like the TypeScript example.
 
 ## Files, audio, Realtime and usage
 

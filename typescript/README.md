@@ -1130,6 +1130,13 @@ time. A File Notification asks for no reply. A resumed cursor replays it, and a
 later Turn read keeps it as the `file.notify` Operation's `resultPointer` with
 `kind: "file_notification"`.
 
+Only files in the Session's Drive can be announced. `build/`, `dist/`,
+`target/`, `tmp/` and similar folders, such as `node_modules/` and `.venv/`,
+stay in the Sandbox and never reach the Drive, so `notify_file` cannot announce
+a file there. Tell the model in the Template's instructions to build files it
+hands over into a synced folder such as `out/` or `firmware/`, for example
+with `-o out/firmware.bin`.
+
 The file stays in the Session's Drive, where the Agent may change it, and
 becomes unreadable once the Session is deleted. `session.files` reads it by
 path:
@@ -1183,12 +1190,22 @@ run: async ({ path, version }, { signal }) => {
 },
 ```
 
+Keep the device connected until the Turn ends. A `flash_device` call made
+while no connection executes the Session is reported to the model as not
+performed. A build can take minutes, longer than `send()`'s default 60-second
+wait, so pass a `timeoutMs` that covers the build and close the connection
+only after `send()` returns.
+
 The packaged `flash-device.mjs` example declares this `flash_device` tool:
 `connectDeviceFlasher({ session, device, onFile })` connects the Session with
-it, and `downloadingDevice(save)` stands in for your device channel. Set
-`AGENT_SERVICE_URL`, `ORGANIZATION_API_KEY`, `END_USER_ID`, `SESSION_ID`,
-`MESSAGE_TEXT` and `FIRMWARE_PATH`, where the stand-in saves the image, then
-run:
+it, and `downloadingDevice(save)` stands in for your device channel.
+`flashDeviceWorkflow({ session, device, text, clientEventId, timeoutMs, onFile })`
+connects, sends `text`, stays connected until the Turn ends and returns its
+result. It waits up to 10 minutes by default. When the wait ends first, it
+throws `TurnWaitTimeoutError` and disconnects, and the Turn goes on without the
+device. Set `AGENT_SERVICE_URL`, `ORGANIZATION_API_KEY`, `END_USER_ID`,
+`SESSION_ID`, `MESSAGE_TEXT` and `FIRMWARE_PATH`, where the stand-in saves the
+image, and optionally `TURN_TIMEOUT_SECONDS` (default 600), then run:
 
 ```sh
 node node_modules/@tidblink/server/examples/flash-device.mjs
