@@ -1,5 +1,5 @@
 import { ConnectionError, TiDBLinkError } from "./errors.js";
-import { fetchDownload, requireActiveGrant } from "./files.js";
+import { fetchDownload } from "./files.js";
 import { apiErrorFrom, HttpClient, requireKnownKeys } from "./http.js";
 import type { RequestOptions } from "./organization.js";
 
@@ -62,8 +62,8 @@ export class SessionDriveFiles {
     } catch {
       value = undefined;
     }
+    // The service enforces the ticket's expiry; a client clock may be wrong.
     const ticket = this.#ticket(value, requestId);
-    requireActiveGrant(ticket.expiresAt);
     const download = await fetchDownload(this.#http, ticket.url, request.signal);
     if (!download.ok) throw await apiErrorFrom(download, requestId);
     const bytes = await bytesOf(download, requestId);

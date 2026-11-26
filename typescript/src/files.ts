@@ -217,7 +217,7 @@ const requireReady = (
   return file;
 };
 
-export const requireActiveGrant = (expiresAt: string): void => {
+const requireActiveGrant = (expiresAt: string): void => {
   if (
     !Number.isFinite(Date.parse(expiresAt)) ||
     Date.parse(expiresAt) <= Date.now()

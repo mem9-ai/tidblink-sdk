@@ -166,12 +166,15 @@ test("a large file's read follows the download ticket the service answers with, 
     files.read("unusable.bin"),
     (error) => error instanceof TiDBLinkError && /ticket/.test(error.message),
   );
-  const before = redemptions.length;
-  await assert.rejects(
-    files.read("expired.bin"),
-    (error) => error instanceof TiDBLinkApiError && error.status === 410,
+  // The service, not the client's clock, decides whether a ticket expired.
+  assert.equal(
+    new TextDecoder().decode(await files.read("expired.bin")),
+    "large",
   );
-  assert.equal(redemptions.length, before);
+  assert.deepEqual(redemptions.at(-1), {
+    url: "/api/v1/drive-downloads/v1.session-file.k1.expired",
+    authorization: undefined,
+  });
 });
 
 test("createDownloadTicket returns an absolute keyless URL for the file, pinned to its version", async () => {

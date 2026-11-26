@@ -290,7 +290,7 @@ def _require_ready(file: UserFile, byte_size: int, sha256: str) -> UserFile:
     return file
 
 
-def require_active_grant(expires_at: object) -> None:
+def _require_active_grant(expires_at: object) -> None:
     expiry = _parse_time(expires_at)
     if expiry is None or expiry <= datetime.now(timezone.utc):
         raise TiDBLinkApiError(
@@ -577,7 +577,7 @@ class UserFiles:
         The request carries only the grant's headers: never the API Key, and
         none of the transport's default headers, cookies or auth.
         """
-        require_active_grant(expires_at)
+        _require_active_grant(expires_at)
         destination = _transfer_url(str(self._http.resolve_url(url)))
         body, request_headers = bytes_request(view, headers, length)
         client = self._http.client
@@ -673,7 +673,7 @@ class UserFiles:
             upload_id = upload["uploadId"]
             if upload["file"].get("status") == "ready":
                 return _require_ready(upload["file"], checksum.byte_length, checksum.hex)
-            require_active_grant(upload["expiresAt"])
+            _require_active_grant(upload["expiresAt"])
             parts: list[UploadedFilePart] | None = None
             if upload["mode"] == "tidb-link":
                 grant = upload.get("uploadUrl")
@@ -795,7 +795,7 @@ class UserFiles:
         """
         if not isinstance(grant, Mapping) or not isinstance(grant.get("url"), str):
             raise TypeError("download_from_grant requires a FileDownloadGrant")
-        require_active_grant(grant.get("expiresAt"))
+        _require_active_grant(grant.get("expiresAt"))
         response = await fetch_download(self._http, grant["url"])
         try:
             if not response.is_success:

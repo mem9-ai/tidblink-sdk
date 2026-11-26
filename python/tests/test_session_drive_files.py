@@ -115,11 +115,9 @@ async def test_a_large_files_read_follows_the_download_ticket_the_service_answer
         await files.read("truncated.bin")
     with pytest.raises(TiDBLinkError, match="ticket"):
         await files.read("unusable.bin")
-    before = len(redemptions)
-    with pytest.raises(TiDBLinkApiError) as expired:
-        await files.read("expired.bin")
-    assert expired.value.status == 410
-    assert len(redemptions) == before
+    # The service, not the client's clock, decides whether a ticket expired.
+    assert await files.read("expired.bin") == b"large"
+    assert redemptions[-1] == ("/api/v1/drive-downloads/v1.session-file.k1.expired", None)
 
 
 async def test_create_download_ticket_returns_an_absolute_keyless_url_for_the_file_pinned_to_its_version() -> None:

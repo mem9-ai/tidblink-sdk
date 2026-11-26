@@ -10,7 +10,7 @@ import httpx
 
 from ._http import HttpClient, api_error_from, query_string, segment
 from .errors import TiDBLinkConnectionError, TiDBLinkError
-from .files import fetch_download, require_active_grant
+from .files import fetch_download
 
 __all__ = ["SessionDriveFiles", "SessionDriveFileTicket"]
 
@@ -101,8 +101,8 @@ class SessionDriveFiles:
             value = None
         finally:
             await response.aclose()
+        # The service enforces the ticket's expiry; a client clock may be wrong.
         ticket = self._ticket(value, stable_request_id)
-        require_active_grant(ticket["expiresAt"])
         download = await fetch_download(self._http, ticket["url"])
         if not download.is_success:
             try:
