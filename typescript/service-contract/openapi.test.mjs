@@ -193,6 +193,24 @@ test("history pages preserve Full Agent and Realtime projections", () => {
   assert.equal(properties(facts[1]).interrupted.type, "boolean");
 });
 
+test("a failed File Notification's Operation says why in Turn reads", () => {
+  const turns = properties(schema("TurnsResponseOpenApiDto")).turns.items.oneOf;
+  const handoff = properties(schema("TemplateHandoffTurn"));
+  for (const operations of [
+    ...turns.map((variant) => properties(variant).operations),
+    handoff.operations,
+  ]) {
+    const operation = operations.items;
+    assert(!operation.required.includes("fileRefusal"));
+    const refusal = operation.properties.fileRefusal;
+    assert.deepEqual(refusal.required, ["reason"]);
+    assert.deepEqual(Object.keys(refusal.properties).sort(), ["path", "reason"]);
+    assert.equal(refusal.properties.reason.type, "string");
+    assert(refusal.properties.reason.enum.includes("local_only"));
+    assert.equal(refusal.properties.path.type, "string");
+  }
+});
+
 test("cancel and checkpoint retry keep exact command identities and distinct receipt shapes", () => {
   for (const kind of ["cancel", "retry"]) {
     const command = schema("SessionEventOpenApiDto").oneOf.find((variant) =>

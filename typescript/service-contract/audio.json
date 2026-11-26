@@ -1,6 +1,6 @@
 {
-  "revision": "94c6905cfe5730454b101f66aa2f649446b4c008",
-  "sourceOpenApiSha256": "0c0c77a30558b9dc6930b468643349b55687c532316c4c04389ba69869ba33db",
+  "revision": "29506fe56f9b0de17da5ac26a50b22a9662f1acb",
+  "sourceOpenApiSha256": "382d7109176cd2b9d6f7210e06948f67699d00b2aae15970917996383e4a4323",
   "paths": {
     "/api/v1/org/users/{userId}/sessions/{id}/turns/audio": {
       "post": {
@@ -944,6 +944,40 @@
                         "nullable": true,
                         "format": "date-time",
                         "description": "Last modification time, or null when storage reports none."
+                      }
+                    }
+                  },
+                  "fileRefusal": {
+                    "description": "Why a File Notification announced nothing, present only on the failed step of a file.notify Operation. The Operation in Turn reads carries the same fileRefusal. New reasons may be added; treat an unknown reason as a generic refusal.",
+                    "type": "object",
+                    "required": [
+                      "reason"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "reason": {
+                        "type": "string",
+                        "enum": [
+                          "not_found",
+                          "directory",
+                          "local_only",
+                          "uploads",
+                          "reserved",
+                          "skills",
+                          "invalid_path",
+                          "path_too_long",
+                          "invalid_arguments",
+                          "limit_reached",
+                          "drain_failed",
+                          "unavailable"
+                        ],
+                        "description": "not_found, no file at the path; directory, the path names a folder; local_only, the path is in a folder such as build/, dist/ or node_modules/ that the sandbox keeps to itself and never saves to the Session's Drive; uploads, a read-only upload; reserved, the platform's .tidb-link folder; skills, the read-only Skill folder; invalid_path, not a path inside the Session's Drive; path_too_long, longer than a download ticket can carry; invalid_arguments, an unknown argument or an invalid display name; limit_reached, the Turn already announced 20 files; drain_failed, the sandbox could not save its pending writes, so the file may be incomplete; unavailable, storage could not be read right now."
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "description": "The path the Agent tried, relative to the Session's Drive root when it resolves inside it, otherwise as the Agent gave it. Absent when the Agent gave no usable path."
                       }
                     }
                   }

@@ -1,6 +1,6 @@
 {
-  "revision": "94c6905cfe5730454b101f66aa2f649446b4c008",
-  "sourceOpenApiSha256": "0c0c77a30558b9dc6930b468643349b55687c532316c4c04389ba69869ba33db",
+  "revision": "29506fe56f9b0de17da5ac26a50b22a9662f1acb",
+  "sourceOpenApiSha256": "382d7109176cd2b9d6f7210e06948f67699d00b2aae15970917996383e4a4323",
   "paths": {
     "/api/v1/org/users/{userId}/agents": {
       "post": {
