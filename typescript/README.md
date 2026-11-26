@@ -1176,29 +1176,21 @@ the announced path and version as the call's arguments, and the device's
 answer is the tool's result:
 
 ```ts
-const session = organization.user(userId).session(sessionId);
-const conn = await session.connect({
-  onFile: (file) => app.push(deviceId, { building: file.name }),
-  tools: {
-    flash_device: {
-      description:
-        "Flash a firmware image onto the device. Call notify_file first and pass its path and version.",
-      parameters: {
-        type: "object",
-        properties: { path: { type: "string" }, version: { type: "string" } },
-        required: ["path", "version"],
-        additionalProperties: false,
-      },
-      run: async ({ path, version }, { signal }) => {
-        const ticket = await session.files.createDownloadTicket(String(path), {
-          version: String(version),
-        });
-        const result = await askDevice(deviceId, "flash", { url: ticket.url }, { signal });
-        return result.ok ? "Flashed" : `Flash failed: ${result.error}`;
-      },
-    },
-  },
-});
+run: async ({ path, version }, { signal }) => {
+  const ticket = await session.files.createDownloadTicket(path, { version, signal });
+  return device.flash({ url: ticket.url, byteSize: ticket.byteSize }, { signal });
+},
+```
+
+The packaged `flash-device.mjs` example declares this `flash_device` tool:
+`connectDeviceFlasher({ session, device, onFile })` connects the Session with
+it, and `downloadingDevice(save)` stands in for your device channel. Set
+`AGENT_SERVICE_URL`, `ORGANIZATION_API_KEY`, `END_USER_ID`, `SESSION_ID`,
+`MESSAGE_TEXT` and `FIRMWARE_PATH`, where the stand-in saves the image, then
+run:
+
+```sh
+node node_modules/@tidblink/server/examples/flash-device.mjs
 ```
 
 The model sees `run`'s result in the same Turn and can, for example, fix the
@@ -1434,10 +1426,11 @@ fixture lifecycle with real upload state and a controlled Drive9/S3 byte supplie
 They verify inline, multipart and empty uploads, cancellation and invalid content,
 large-file download-ticket redemption, and a real Runtime file read whose answer
 contains the uploaded content. A File Notification case lets the real Runtime
-write a file, announce it and call a Client Tool with its path and version: the
-installed SDK receives it through `onFile`, reads that version and downloads it
-through a keyless ticket inside the tool, and after a rewrite gets
-`DriveFileVersionConflictError`. A Session Drive file above 50 MiB cannot be
+write a file, announce it and call the installed `flash-device.mjs` example's
+Client Tool with its path and version: the installed SDK receives it through
+`onFile`, the stand-in device downloads that version through a keyless ticket
+inside the tool, a pinned read returns the same bytes, and after a rewrite the
+SDK gets `DriveFileVersionConflictError`. A Session Drive file above 50 MiB cannot be
 written through the public routes, so its ticket answer is covered by the
 default HTTP tests only. The installed upload example exercises the same
 public workflow. Real supplier deployment certification is outside this evidence.

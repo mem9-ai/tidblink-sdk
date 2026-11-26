@@ -36,6 +36,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
   assert(files.includes("examples/lamp-backend.mjs"));
   assert(files.includes("examples/upload-file.mjs"));
   assert(files.includes("examples/submit-audio.mjs"));
+  assert(files.includes("examples/flash-device.mjs"));
   assert(!files.some((file) => file.includes("workspace")));
   assert(
     files.every(
@@ -52,6 +53,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
         file === "examples/control-turn.mjs" ||
         file === "examples/upload-file.mjs" ||
         file === "examples/submit-audio.mjs" ||
+        file === "examples/flash-device.mjs" ||
         /^dist\/.+\.(?:js|d\.ts|map)$/.test(file),
     ),
   );
@@ -616,6 +618,9 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
     const { createLampBackend, memoryStore } = await import("@tidblink/server/examples/lamp-backend.mjs");
     assert.equal(typeof createLampBackend, "function");
     assert.equal(typeof memoryStore, "function");
+    const { connectDeviceFlasher, downloadingDevice } = await import("@tidblink/server/examples/flash-device.mjs");
+    assert.equal(typeof connectDeviceFlasher, "function");
+    assert.equal(typeof downloadingDevice, "function");
     const { createSessionWorkflow } = await import("@tidblink/server/examples/create-session.mjs");
     assert.equal(typeof createSessionWorkflow, "function");
     assert.equal(typeof prepareRealtimeConnection, "function");

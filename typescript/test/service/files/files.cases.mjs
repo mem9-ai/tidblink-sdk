@@ -7,6 +7,10 @@ import {
   OrganizationClient,
   TiDBLinkApiError,
 } from "@tidblink/server";
+import {
+  connectDeviceFlasher,
+  downloadingDevice,
+} from "@tidblink/server/examples/flash-device.mjs";
 import { uploadFileWorkflow } from "@tidblink/server/examples/upload-file.mjs";
 
 const baseUrl = process.env.SDK_SERVICE_URL;
@@ -209,7 +213,7 @@ test("the installed upload example includes file content in its conversation", a
   assert(result.result.text.includes(unique), result.result.text);
 });
 
-test("a File Notification reaches onFile and its Client Tool reads the announced version, which a rewrite retires", async () => {
+test("the installed flash-device example flashes the version a File Notification announced, which a rewrite retires", async () => {
   const organization = new OrganizationClient({
     baseUrl,
     apiKey: process.env.SDK_ORGANIZATION_KEY,
@@ -222,29 +226,16 @@ test("a File Notification reaches onFile and its Client Tool reads the announced
     });
     const announced = [];
     const flashed = [];
-    const conn = await session.connect({
-      tools: {
-        flash_device: {
-          description:
-            "Flash a firmware image onto the device. Call notify_file first and pass its path and version.",
-          parameters: {
-            type: "object",
-            properties: { path: { type: "string" }, version: { type: "string" } },
-            required: ["path", "version"],
-            additionalProperties: false,
-          },
-          run: async ({ path, version }) => {
-            const bytes = await session.files.read(path, { version });
-            const ticket = await session.files.createDownloadTicket(path, { version });
-            // The device downloads the ticket's URL without a key.
-            const download = await fetch(ticket.url);
-            flashed.push({
-              bytes: Buffer.from(bytes).toString(),
-              ticket,
-              download: { status: download.status, text: await download.text() },
-            });
-            return "flashed-ok";
-          },
+    const tickets = [];
+    const device = downloadingDevice((image) =>
+      flashed.push(Buffer.from(image).toString()),
+    );
+    const conn = await connectDeviceFlasher({
+      session,
+      device: {
+        flash: (ticket, options) => {
+          tickets.push(ticket);
+          return device.flash(ticket, options);
         },
       },
       onFile: (file) => announced.push(file),
@@ -252,7 +243,7 @@ test("a File Notification reaches onFile and its Client Tool reads the announced
     const reply = await conn.send("SDK_FIXTURE_NOTIFY_FILE: build the firmware and flash it", {
       timeoutMs: 30000,
     });
-    assert.equal(reply.text, "Device answered: flashed-ok");
+    assert.equal(reply.text, `Device answered: Flashed ${"firmware v1".length} bytes`);
     assert.equal(announced.length, 1);
     const [file] = announced;
     assert.deepEqual(
@@ -267,11 +258,17 @@ test("a File Notification reaches onFile and its Client Tool reads the announced
     );
     assert.equal(typeof file.version, "string");
     assert(file.version);
-    assert.equal(flashed.length, 1);
-    assert.equal(flashed[0].bytes, "firmware v1");
-    assert.equal(flashed[0].ticket.byteSize, file.byteSize);
-    assert(flashed[0].ticket.url.startsWith(`${baseUrl}/api/v1/drive-downloads/`));
-    assert.deepEqual(flashed[0].download, { status: 200, text: "firmware v1" });
+    // The device downloaded the announced bytes from the ticket, without a key.
+    assert.deepEqual(flashed, ["firmware v1"]);
+    assert.equal(tickets.length, 1);
+    assert.equal(tickets[0].byteSize, file.byteSize);
+    assert(tickets[0].url.startsWith(`${baseUrl}/api/v1/drive-downloads/`));
+    assert.equal(
+      Buffer.from(
+        await session.files.read(file.path, { version: file.version }),
+      ).toString(),
+      "firmware v1",
+    );
     // A late reader recovers the announcement from the Turn's Operations.
     const turn = await session.getTurn(reply.turnId);
     assert.deepEqual(
@@ -296,8 +293,9 @@ test("a File Notification reaches onFile and its Client Tool reads the announced
     );
     assert.equal(rewrite.status, 201);
     for (const pinned of [
-      session.files.read(file.path, { version: file.version }),
-      session.files.createDownloadTicket(file.path, { version: file.version }),
+      () => session.files.read(file.path, { version: file.version }),
+      () =>
+        session.files.createDownloadTicket(file.path, { version: file.version }),
     ])
       await assert.rejects(
         pinned,
@@ -305,7 +303,7 @@ test("a File Notification reaches onFile and its Client Tool reads the announced
           error instanceof DriveFileVersionConflictError &&
           error.code === "drive_file_version_conflict",
       );
-    const stale = await fetch(flashed[0].ticket.url);
+    const stale = await fetch(tickets[0].url);
     assert.equal(stale.status, 409);
     assert.equal(
       Buffer.from(await session.files.read(file.path)).toString(),

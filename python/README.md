@@ -221,31 +221,14 @@ that takes the path and version, and tell the model in the Template's
 instructions to call it after `notify_file`:
 
 ```python
-session = organization.user(user_id).session(session_id)
-
-
-async def flash_device(args, context):
+async def flash_device(args, context):  # cancelled at context.deadline_at
     ticket = await session.files.create_download_ticket(args["path"], version=args["version"])
-    result = await ask_device(device_id, "flash", {"url": ticket["url"]})  # cancelled at context.deadline_at
-    return "Flashed" if result["ok"] else f"Flash failed: {result['error']}"
-
-
-conn = await session.connect(
-    tools={
-        "flash_device": ClientToolHandler(
-            description="Flash a firmware image onto the device. Call notify_file first and pass its path and version.",
-            parameters={
-                "type": "object",
-                "properties": {"path": {"type": "string"}, "version": {"type": "string"}},
-                "required": ["path", "version"],
-                "additionalProperties": False,
-            },
-            run=flash_device,
-        )
-    },
-    on_file=lambda file: app.push(device_id, {"building": file["name"]}),
-)
+    return await device.flash(url=ticket["url"], byte_size=ticket["byteSize"])
 ```
+
+[`examples/flash_device.py`](examples/flash_device.py) declares this tool in
+`connect_device_flasher(session, device, on_file=...)`, with
+`DownloadingDevice(save)` standing in for your device channel.
 
 ## Files, audio, Realtime and usage
 

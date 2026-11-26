@@ -33,9 +33,10 @@
 - Turn reads type the `file.notify` Operation kind and its
   `file_notification` result pointer. The audio Turn's `operation_step` event
   type carries the same optional `file`.
-- The package README shows a notify-then-Client-Tool device example, where a
-  `flash_device` Client Tool hands the device a ticket for the announced
-  version.
+- The packaged `flash-device.mjs` example (`examples/flash_device.py` in
+  Python) is the notify-then-Client-Tool device scenario: its `flash_device`
+  Client Tool hands the device a keyless ticket for the announced version, and
+  the device's answer is the tool's result. The service verification runs it.
 - The Python SDK offers the same: `session.connect(on_file=...)`,
   `session.files.read(path, version=...)`,
   `session.files.create_download_ticket(path, version=...)`,

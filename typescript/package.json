@@ -27,6 +27,7 @@
     "./examples/upload-file.mjs": "./examples/upload-file.mjs",
     "./examples/submit-audio.mjs": "./examples/submit-audio.mjs",
     "./examples/serve-connector.mjs": "./examples/serve-connector.mjs",
+    "./examples/flash-device.mjs": "./examples/flash-device.mjs",
     "./examples/lamp-backend.mjs": "./examples/lamp-backend.mjs"
   },
   "files": [
@@ -40,6 +41,7 @@
     "examples/upload-file.mjs",
     "examples/submit-audio.mjs",
     "examples/serve-connector.mjs",
+    "examples/flash-device.mjs",
     "examples/lamp-backend.mjs"
   ],
   "scripts": {
