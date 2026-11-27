@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.6.0-rc.0
+
+Prerelease on the `next` dist-tag. It breaks 0.5: see the Session language
+rename below.
+
 - Align with service
   [c6ae2e37](https://github.com/mem9-ai/agent-stack/commit/c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7),
   OpenAPI SHA-256
