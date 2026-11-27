@@ -39,22 +39,19 @@ export interface RealtimeModelCatalog {
   models: RealtimeModel[];
 }
 
-export interface RealtimeVoiceSetting {
-  language: RealtimeLanguage;
-}
-
 export interface RealtimeModelSelection {
   model: string | null;
   revision: number;
   etag: string;
-  voice: RealtimeVoiceSetting | null;
+  /** The Session's fixed Realtime Language; `null` when its recipe disables Realtime. */
+  language: RealtimeLanguage | null;
 }
 
 export interface RealtimeSessionSelectionFields {
   realtimeModel: string | null;
   realtimeModelRevision: number;
   realtimeModelEtag: string;
-  realtimeVoice: RealtimeVoiceSetting | null;
+  realtimeLanguage: RealtimeLanguage | null;
 }
 
 export const realtimeModelSelectionFrom = (
@@ -63,7 +60,7 @@ export const realtimeModelSelectionFrom = (
   model: session.realtimeModel,
   revision: session.realtimeModelRevision,
   etag: session.realtimeModelEtag,
-  voice: session.realtimeVoice,
+  language: session.realtimeLanguage,
 });
 
 export interface RealtimeAudioFormats {
@@ -205,16 +202,14 @@ export const requireRealtimeModelSelectionReceipt = (
   requestId: string,
 ): RealtimeModelSelection => {
   if (!isRecord(value)) return unusableReceipt("the Realtime Model selection", requestId);
-  const voice = value.realtimeVoice;
+  const language = value.realtimeLanguage;
   if (
     !isNullableString(value.realtimeModel) ||
     !Number.isInteger(value.realtimeModelRevision) ||
     !isNumber(value.realtimeModelRevision) ||
     value.realtimeModelRevision <= 0 ||
     !isString(value.realtimeModelEtag) ||
-    (voice !== null &&
-      (!isRecord(voice) ||
-        (voice.language !== "zh-CN" && voice.language !== "en-US")))
+    (language !== null && language !== "zh-CN" && language !== "en-US")
   )
     return unusableReceipt("the Realtime Model selection", requestId);
   return realtimeModelSelectionFrom(value as unknown as RealtimeSessionSelectionFields);

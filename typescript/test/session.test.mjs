@@ -51,7 +51,7 @@ const sessionRecord = (overrides = {}) => ({
   realtimeModel: null,
   realtimeModelRevision: 1,
   realtimeModelEtag: '"session-realtime-model:session_1:1"',
-  realtimeVoice: null,
+  realtimeLanguage: null,
   template: { templateId: "template_1", contentDigest: "a".repeat(64) },
   realtime: null,
   configurationEpoch: 1,

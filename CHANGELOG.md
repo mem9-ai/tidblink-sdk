@@ -3,10 +3,11 @@
 ## Unreleased
 
 - Align with service
-  [eb3a04d0](https://github.com/mem9-ai/agent-stack/commit/eb3a04d0c23d64f65cb80d9cbef80c332c7c080a),
+  [c6ae2e37](https://github.com/mem9-ai/agent-stack/commit/c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7),
   OpenAPI SHA-256
-  `73ecab7576483c43c65a35ecbf5b8bb7ad266de4fcaca3f00b74bf36adadefa4`, which
-  adds File Notifications and reads of files in a Session's Drive. The
+  `f3ed7342d8156d191d9756d99329d62ef549d05b369cca27c938f0eb973f3269`, which
+  adds File Notifications and reads of files in a Session's Drive, and
+  renames the Session's language field (below). The
   frozen files subset adds the Organization routes
   `sessions/{id}/files/content` and `sessions/{id}/files/download-tickets`.
   Otherwise the subsets change only by the error codes
@@ -14,8 +15,20 @@
   `file` of an `operation_step` event, by the optional `fileRefusal` of a
   failed `operation_step` event and of an Operation in Turn reads, and by
   descriptions.
+  The management subset adds the required `etag` of an Organization Skill
+  read, for the service's new-Version upload route, which this SDK does not
+  call yet; `SkillSummary` does not expose it.
   `drive_file_too_large` is the Console's refusal to download a Template
   Test's large file; no route the SDK calls answers it.
+- **Breaking:** Sessions carry their fixed Realtime Language as
+  `realtimeLanguage: "zh-CN" | "en-US" | null` instead of
+  `realtimeVoice: { language } | null`, following the service rename (ADR 0117
+  reserves `realtimeVoice` for the voice selection). `RealtimeModelSelection`
+  from `getRealtimeModelSelection` and `setRealtimeModel` replaces
+  `voice: { language } | null` with `language: RealtimeLanguage | null`, and
+  `RealtimeVoiceSetting` is no longer exported. A `setRealtimeModel` receipt
+  without a valid `realtimeLanguage` raises `OutcomeUnknownError`. The Python
+  SDK makes the same change.
 - `session.connect({ onFile })` runs for each file the Agent announces with a
   File Notification: an `agent.session.turn.item.added` `operation_step` whose
   payload carries `file`, `{ path, name, version, byteSize, updatedAt }`

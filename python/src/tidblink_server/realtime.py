@@ -58,15 +58,12 @@ class RealtimeModelCatalog(TypedDict):
     models: list[RealtimeModel]
 
 
-class RealtimeVoiceSetting(TypedDict):
-    language: RealtimeLanguage
-
-
 class RealtimeModelSelection(TypedDict):
     model: str | None
     revision: int
     etag: str
-    voice: RealtimeVoiceSetting | None
+    #: The Session's fixed Realtime Language; None when its recipe disables Realtime.
+    language: RealtimeLanguage | None
 
 
 class RealtimeConnection(TypedDict):
@@ -98,7 +95,7 @@ def realtime_model_selection_from(session: dict[str, Any]) -> RealtimeModelSelec
         "model": session.get("realtimeModel"),
         "revision": session.get("realtimeModelRevision"),  # type: ignore[typeddict-item]
         "etag": session.get("realtimeModelEtag"),  # type: ignore[typeddict-item]
-        "voice": session.get("realtimeVoice"),
+        "language": session.get("realtimeLanguage"),
     }
 
 
@@ -216,7 +213,7 @@ def _unusable_receipt(operation: str, request_id: str | None) -> NoReturn:
 def require_realtime_model_selection_receipt(value: object, request_id: str | None) -> RealtimeModelSelection:
     if not isinstance(value, dict):
         _unusable_receipt("the Realtime Model selection", request_id)
-    voice = value.get("realtimeVoice", 0)
+    language = value.get("realtimeLanguage", 0)
     revision = value.get("realtimeModelRevision")
     if (
         "realtimeModel" not in value
@@ -224,7 +221,7 @@ def require_realtime_model_selection_receipt(value: object, request_id: str | No
         or not _is_integer(revision)
         or revision <= 0  # type: ignore[operator]
         or not _is_string(value.get("realtimeModelEtag"))
-        or (voice is not None and (not isinstance(voice, dict) or voice.get("language") not in ("zh-CN", "en-US")))
+        or (language is not None and language not in ("zh-CN", "en-US"))
     ):
         _unusable_receipt("the Realtime Model selection", request_id)
     return realtime_model_selection_from(value)

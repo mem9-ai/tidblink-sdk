@@ -1,6 +1,6 @@
 {
-  "revision": "eb3a04d0c23d64f65cb80d9cbef80c332c7c080a",
-  "sourceOpenApiSha256": "73ecab7576483c43c65a35ecbf5b8bb7ad266de4fcaca3f00b74bf36adadefa4",
+  "revision": "c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7",
+  "sourceOpenApiSha256": "f3ed7342d8156d191d9756d99329d62ef549d05b369cca27c938f0eb973f3269",
   "paths": {
     "/api/v1/org/users/{userId}/agents": {
       "post": {
@@ -958,20 +958,12 @@
                 "type": "string",
                 "nullable": true
               },
-              "realtimeVoice": {
-                "description": "Fixed Session voice setting; null disables voice. This does not guarantee current provider availability.",
-                "type": "object",
-                "properties": {
-                  "language": {
-                    "type": "string",
-                    "enum": [
-                      "zh-CN",
-                      "en-US"
-                    ]
-                  }
-                },
-                "required": [
-                  "language"
+              "realtimeLanguage": {
+                "description": "Fixed Session Realtime Language; null disables Realtime. This does not guarantee current provider availability.",
+                "type": "string",
+                "enum": [
+                  "zh-CN",
+                  "en-US"
                 ],
                 "nullable": true
               },
@@ -1220,7 +1212,7 @@
               "status",
               "billingTag",
               "activeTurnId",
-              "realtimeVoice",
+              "realtimeLanguage",
               "realtime",
               "createdAt",
               "updatedAt",
@@ -1857,20 +1849,12 @@
                   "type": "string",
                   "nullable": true
                 },
-                "realtimeVoice": {
-                  "description": "Fixed Session voice setting; null disables voice. This does not guarantee current provider availability.",
-                  "type": "object",
-                  "properties": {
-                    "language": {
-                      "type": "string",
-                      "enum": [
-                        "zh-CN",
-                        "en-US"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "language"
+                "realtimeLanguage": {
+                  "description": "Fixed Session Realtime Language; null disables Realtime. This does not guarantee current provider availability.",
+                  "type": "string",
+                  "enum": [
+                    "zh-CN",
+                    "en-US"
                   ],
                   "nullable": true
                 },
@@ -2119,7 +2103,7 @@
                 "status",
                 "billingTag",
                 "activeTurnId",
-                "realtimeVoice",
+                "realtimeLanguage",
                 "realtime",
                 "createdAt",
                 "updatedAt",

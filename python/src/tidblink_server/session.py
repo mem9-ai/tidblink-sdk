@@ -46,7 +46,7 @@ from .realtime import (
     RealtimeModelSelection,
     RealtimeOpenAudio,
     RealtimeAudioFormats,
-    RealtimeVoiceSetting,
+    RealtimeLanguage,
     realtime_model_selection_from,
     require_open_realtime_connection_receipt,
     require_realtime_connect_grant_receipt,
@@ -107,7 +107,7 @@ class SessionRecord(TypedDict):
     realtimeModel: str | None
     realtimeModelRevision: int
     realtimeModelEtag: str
-    realtimeVoice: RealtimeVoiceSetting | None
+    realtimeLanguage: RealtimeLanguage | None
     template: NotRequired[SessionTemplate | None]
     realtime: SessionRealtime | None
     #: Current Session Configuration Epoch; None for read-only or provider-owned snapshots.

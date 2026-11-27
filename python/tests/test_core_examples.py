@@ -285,7 +285,7 @@ def realtime_service(received: Received):
         "realtimeModel": "voice-a",
         "realtimeModelRevision": 1,
         "realtimeModelEtag": "realtime-v1",
-        "realtimeVoice": {"language": "en-US"},
+        "realtimeLanguage": "en-US",
     }
     if received.path == SESSION_PATH:
         return 200, {}, {"session": selection}
@@ -347,7 +347,7 @@ def test_the_prepare_realtime_connection_example_returns_the_one_time_grant() ->
     assert prepared["connectToken"].startswith("rct_")
     assert prepared["selection"]["model"] == "voice-a"
     assert prepared["catalog"]["defaultModel"] == "voice-a"
-    assert selected["selection"] == {"model": "voice-b", "revision": 2, "etag": "realtime-v2", "voice": {"language": "en-US"}}
+    assert selected["selection"] == {"model": "voice-b", "revision": 2, "etag": "realtime-v2", "language": "en-US"}
     assert reselect == [
         ("GET", f"{USER_PATH}/realtime-models", None),
         ("GET", SESSION_PATH, None),
