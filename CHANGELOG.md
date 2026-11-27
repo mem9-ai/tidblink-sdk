@@ -15,7 +15,9 @@
   `file` of an `operation_step` event, by the optional `fileRefusal` of a
   failed `operation_step` event and of an Operation in Turn reads, and by
   descriptions.
-  The management subset adds the `etag` of an Organization Skill read.
+  The management subset adds the required `etag` of an Organization Skill
+  read, for the service's new-Version upload route, which this SDK does not
+  call yet; `SkillSummary` does not expose it.
   `drive_file_too_large` is the Console's refusal to download a Template
   Test's large file; no route the SDK calls answers it.
 - **Breaking:** Sessions carry their fixed Realtime Language as

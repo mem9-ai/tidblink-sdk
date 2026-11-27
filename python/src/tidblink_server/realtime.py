@@ -62,8 +62,8 @@ class RealtimeModelSelection(TypedDict):
     model: str | None
     revision: int
     etag: str
+    #: The Session's fixed Realtime Language; None when its recipe disables Realtime.
     language: RealtimeLanguage | None
-    """The Session's fixed Realtime Language; None when its recipe disables Realtime."""
 
 
 class RealtimeConnection(TypedDict):

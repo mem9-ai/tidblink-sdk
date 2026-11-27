@@ -488,3 +488,26 @@ for (const [label, language] of [
     );
   });
 }
+
+test("setRealtimeModel accepts a receipt whose Session has Realtime disabled", async () => {
+  const baseUrl = await serve(async (request, response) => {
+    for await (const _chunk of request);
+    response.setHeader("content-type", "application/json");
+    response.end(
+      JSON.stringify({
+        session: {
+          realtimeModel: "voice-b",
+          realtimeModelRevision: 2,
+          realtimeModelEtag: '"session_1-realtime-2"',
+          realtimeLanguage: null,
+        },
+      }),
+    );
+  });
+  assert.deepEqual(
+    await clientFor(baseUrl)
+      .session("session_1")
+      .setRealtimeModel("voice-b", { ifMatch: '"session_1-realtime-1"' }),
+    { model: "voice-b", revision: 2, etag: '"session_1-realtime-2"', language: null },
+  );
+});
