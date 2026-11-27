@@ -2,7 +2,7 @@
 export const TIDB_LINK_API_VERSION = "0.0.1" as const;
 /** Exact service baseline for the supported refreshed SDK surface. */
 export const TIDB_LINK_REVISION =
-  "eb3a04d0c23d64f65cb80d9cbef80c332c7c080a" as const;
+  "c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7" as const;
 
 export {
   TiDBLinkApiError,
@@ -115,7 +115,6 @@ export type {
   RealtimeModelSelection,
   RealtimeOpusAudioFormat,
   RealtimePcm16AudioFormat,
-  RealtimeVoiceSetting,
 } from "./realtime.js";
 export type {
   CreateTurnInput,

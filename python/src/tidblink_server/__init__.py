@@ -185,7 +185,6 @@ from .realtime import (
     RealtimeOpenAudio,
     RealtimeOpusAudioFormat,
     RealtimePcm16AudioFormat,
-    RealtimeVoiceSetting,
 )
 from .session import SelectableSessionModel, Session, SessionModel, SessionRecord, SessionSandboxSelection
 from .template_switch import TemplateSwitchReceipt, TemplateSwitchStatus
@@ -195,9 +194,9 @@ from .user import AgentModelCatalog, AgentTemplate, AgentTemplatePage, EndUserCl
 #: TiDB Link OpenAPI version supported by this SDK release.
 TIDB_LINK_API_VERSION = "0.0.1"
 #: Exact service baseline for the supported SDK surface.
-TIDB_LINK_REVISION = "eb3a04d0c23d64f65cb80d9cbef80c332c7c080a"
+TIDB_LINK_REVISION = "c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7"
 #: SHA-256 of that service revision's ``docs/openapi.yaml``.
-TIDB_LINK_OPENAPI_SHA256 = "73ecab7576483c43c65a35ecbf5b8bb7ad266de4fcaca3f00b74bf36adadefa4"
+TIDB_LINK_OPENAPI_SHA256 = "f3ed7342d8156d191d9756d99329d62ef549d05b369cca27c938f0eb973f3269"
 
 __all__ = [
     "OMIT",
@@ -252,7 +251,6 @@ __all__ = [
     "RealtimeAudioFormats",
     "RealtimeModel",
     "RealtimeOpenAudio",
-    "RealtimeVoiceSetting",
     "AudioTurnEvent",
     "AudioTurnResult",
     "AudioTurnStoppedError",

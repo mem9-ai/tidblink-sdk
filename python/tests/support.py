@@ -96,7 +96,7 @@ def session_record(**overrides: Any) -> dict[str, Any]:
         "realtimeModel": None,
         "realtimeModelRevision": 1,
         "realtimeModelEtag": '"session-realtime-model:session_1:1"',
-        "realtimeVoice": None,
+        "realtimeLanguage": None,
         "template": {"templateId": "template_1", "contentDigest": "a" * 64},
         "realtime": None,
         "configurationEpoch": 1,

@@ -650,7 +650,7 @@ test("the packed SDK installs and typechecks in a clean ESM consumer", async (co
       } else if (request.url === "/api/v1/org/users/user_1/sessions/session_1") {
         response.end(JSON.stringify({ session: {
           realtimeModel: "voice-a", realtimeModelRevision: 1,
-          realtimeModelEtag: "realtime-v1", realtimeVoice: { language: "en-US" },
+          realtimeModelEtag: "realtime-v1", realtimeLanguage: "en-US",
         } }));
       } else if (request.url === "/api/v1/org/users/user_1/sessions/session_1/realtime") {
         response.writeHead(201).end(JSON.stringify({

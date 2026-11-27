@@ -132,7 +132,7 @@ export interface SessionRecord {
   realtimeModel: string | null;
   realtimeModelRevision: number;
   realtimeModelEtag: string;
-  realtimeVoice: import("./realtime.js").RealtimeVoiceSetting | null;
+  realtimeLanguage: import("./realtime.js").RealtimeLanguage | null;
   template?: { templateId: string; contentDigest: string } | null;
   realtime: {
     id: string;

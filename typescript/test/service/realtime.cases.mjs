@@ -79,7 +79,7 @@ test("the installed SDK discovers, selects and manages Realtime Connections", as
     model: "voice-a",
     revision: 1,
     etag: initial.etag,
-    voice: { language: "en-US" },
+    language: "en-US",
   });
   assert.equal(typeof initial.etag, "string");
   assert(initial.etag.length > 0);
