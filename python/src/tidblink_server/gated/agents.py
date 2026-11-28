@@ -43,6 +43,7 @@ class AgentSessionDefaults(TypedDict, total=False):
     template_id: Required[str]
     model: str
     realtime_model: str
+    realtime_voice: str
     billing_tag: BillingTag | None
     additional_instructions: str | None
     sandbox: SessionSandboxSelection
@@ -82,6 +83,7 @@ _WIRE_NAMES = {
     "template_id": "agentTemplateId",
     "model": "model",
     "realtime_model": "realtimeModel",
+    "realtime_voice": "realtimeVoice",
     "billing_tag": "billingTag",
     "additional_instructions": "additionalInstructions",
     "sandbox": "sandbox",
@@ -223,6 +225,7 @@ class Agents:
         idempotency_key: str,
         model: Omittable[str] = OMIT,
         realtime_model: Omittable[str] = OMIT,
+        realtime_voice: Omittable[str | None] = OMIT,
         billing_tag: Omittable[BillingTag | None] = OMIT,
         tools: Omittable[Sequence[ClientToolDeclaration]] = OMIT,
         request_id: str | None = None,
@@ -239,6 +242,9 @@ class Agents:
             body["model"] = model
         if realtime_model is not OMIT:
             body["realtimeModel"] = realtime_model
+        if realtime_voice is not OMIT:
+            # None drops the Agent's voice, so the Session speaks the default voice.
+            body["realtimeVoice"] = realtime_voice
         if billing_tag is not OMIT:
             body["billingTag"] = billing_tag
         if tools is not OMIT:

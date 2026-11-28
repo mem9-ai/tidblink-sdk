@@ -256,6 +256,7 @@ test("createSession returns an ordinary Session bound to the End User", async ()
   const session = await agents(user).createSession("agent_1", {
     idempotencyKey: "agent-session-1",
     model: "model_1",
+    realtimeVoice: null,
     billingTag: { key: "agent", value: "support" },
     tools,
   });
@@ -269,6 +270,8 @@ test("createSession returns an ordinary Session bound to the End User", async ()
     assert.equal(call.headers["idempotency-key"], "agent-session-1");
     assert.deepEqual(call.body, {
       model: "model_1",
+      // null drops the Agent's voice.
+      realtimeVoice: null,
       billingTag: { key: "agent", value: "support" },
       tools,
     });

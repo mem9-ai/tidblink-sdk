@@ -361,6 +361,7 @@ test("Sessions are created from an explicit Template with Session-level options"
     "agentTemplateId",
     "model",
     "realtimeModel",
+    "realtimeVoice",
     "billingTag",
     "tools",
     "additionalInstructions",
@@ -480,4 +481,18 @@ test("the per-Session subscription and REST Client Tool answers are gone", () =>
     document.components.schemas.SessionEventOpenApiDto,
   );
   assert.doesNotMatch(commands, /agent\.session\.input\.client_tool_output/);
+});
+
+test("the realtime-model PATCH takes the model, the voice or both, and the catalog lists voices", () => {
+  const patch = schema("UpdateSessionRealtimeModelOpenApiDto");
+  const fields = properties(patch);
+  assert.deepEqual(Object.keys(fields).sort(), ["realtimeModel", "realtimeVoice"]);
+  assert.equal((patch.required ?? []).length, 0);
+  assert.equal(fields.realtimeVoice.nullable, true);
+  const session = properties(schema("SessionResponseOpenApiDto").properties.session ?? schema("SessionResponseOpenApiDto"));
+  assert(session.realtimeVoice, "Session responses carry realtimeVoice");
+  const catalog = properties(schema("RealtimeModelsResponseOpenApiDto"));
+  for (const key of ["defaultVoice", "voices", "models"]) assert(catalog[key], `catalog lacks ${key}`);
+  assert.deepEqual(Object.keys(properties(catalog.voices.items)).sort(), ["description", "id", "label"]);
+  assert(properties(catalog.models.items).voices, "catalog models list their voices");
 });

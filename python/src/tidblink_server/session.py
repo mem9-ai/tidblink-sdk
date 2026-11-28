@@ -105,6 +105,7 @@ class SessionRecord(TypedDict):
     model: str
     modelRevision: int
     realtimeModel: str | None
+    realtimeVoice: str | None
     realtimeModelRevision: int
     realtimeModelEtag: str
     realtimeLanguage: RealtimeLanguage | None
@@ -281,13 +282,38 @@ class Session:
         return realtime_model_selection_from(response["session"])
 
     async def set_realtime_model(self, model: str, *, if_match: str) -> RealtimeModelSelection:
-        if not isinstance(model, str) or not model or len(model) > 128:
+        """Select only the Realtime Model; the voice is kept and must be one the model speaks."""
+        return await self.set_realtime_selection(model=model, if_match=if_match)
+
+    async def set_realtime_selection(
+        self,
+        *,
+        model: Omittable[str] = OMIT,
+        voice: Omittable[str | None] = OMIT,
+        if_match: str,
+    ) -> RealtimeModelSelection:
+        """Select the Realtime Model, the Realtime Voice or both under one revision.
+
+        An omitted argument keeps its value; ``voice=None`` returns to the release default voice. The
+        resulting model must speak the resulting voice, or the service refuses with
+        ``realtime_voice_unsupported``.
+        """
+        if model is OMIT and voice is OMIT:
+            raise ValueError("Realtime selection requires model, voice or both")
+        if model is not OMIT and (not isinstance(model, str) or not model or len(model) > 128):
             raise ValueError("Realtime Model ID must contain 1-128 characters")
+        if voice is not OMIT and voice is not None and (not isinstance(voice, str) or not voice or len(voice) > 64):
+            raise ValueError("Realtime Voice ID must contain 1-64 characters")
         if not isinstance(if_match, str) or not if_match:
             raise ValueError("Realtime Model selection requires if_match")
+        body: dict[str, Any] = {}
+        if model is not OMIT:
+            body["realtimeModel"] = model
+        if voice is not OMIT:
+            body["realtimeVoice"] = voice
         result = await self._http.patch_response(
             f"{self._path}/realtime-model",
-            {"realtimeModel": model},
+            body,
             if_match=if_match,
             outcome_unknown=True,
         )
@@ -552,6 +578,7 @@ async def create_session(
     idempotency_key: str,
     model: Omittable[str] = OMIT,
     realtime_model: Omittable[str] = OMIT,
+    realtime_voice: Omittable[str] = OMIT,
     billing_tag: Omittable[BillingTag | None] = OMIT,
     tools: Omittable[Sequence[ClientToolDeclaration]] = OMIT,
     additional_instructions: Omittable[str | None] = OMIT,
@@ -566,6 +593,8 @@ async def create_session(
         body["model"] = model
     if realtime_model is not OMIT:
         body["realtimeModel"] = realtime_model
+    if realtime_voice is not OMIT:
+        body["realtimeVoice"] = realtime_voice
     if billing_tag is not OMIT:
         body["billingTag"] = billing_tag
     if tools is not OMIT:

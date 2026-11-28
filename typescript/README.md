@@ -14,7 +14,7 @@ continuous progress, Client Tools, Session connections over Backend Connections,
 File Notifications and reads of files in a Session's Drive,
 conversation history, file attachments,
 Realtime Model/Connection preparation, prerecorded audio and User usage reads for [service revision
-c6ae2e37](https://github.com/mem9-ai/agent-stack/commit/c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7).
+7eabff7c](https://github.com/mem9-ai/agent-stack/commit/7eabff7c48143ecd83161040ed95d79fa2d78ad5).
 
 Text commands return durable receipts independently of execution. Waiting reads the
 original command's outcome. A Session is created directly from an explicit
@@ -426,7 +426,7 @@ The Handoff Turn summarizes the Session so far for the target Template. History
 reads return it as a Turn with `kind: "template_handoff"`, no `userMessage` and
 an empty `userMessages`; when it succeeds, its assistant Message is the summary.
 The service's
-[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
+[ADR 0107](https://github.com/mem9-ai/agent-stack/blob/7eabff7c48143ecd83161040ed95d79fa2d78ad5/docs/adr/0107-switch-session-template-baselines-through-configuration-epochs.md)
 describes what the Session keeps across a switch (models, Billing Tag, Client
 Tools and creation options) and that cancelling the Handoff Turn fails the
 switch.
@@ -932,6 +932,15 @@ const prepared = await session.openRealtimeConnection({
 // prepared.connectTokenExpiresAt directly to the intended terminal.
 ```
 
+To choose a voice, read `catalog.voices` and the voice ids each model lists in
+`model.voices`, then call `session.setRealtimeSelection({ voice: "calm" }, {
+ifMatch: current.etag })`. It changes the model, the voice or both under one
+revision; an omitted field keeps its value and `voice: null` returns to the
+release default voice. The resulting model must speak the resulting voice, so
+change both in one call when the new model does not speak the current voice;
+otherwise the service answers `realtime_voice_unsupported`. Sessions also take
+`realtimeVoice` at creation. Supplier voice names are never exposed.
+
 `setRealtimeModel` requires the independent ETag returned by
 `getRealtimeModelSelection`; a stale ETag raises `ConflictError` with code
 `realtime_model_conflict`. The selection's `language` is the Session's fixed
@@ -1355,7 +1364,7 @@ sends no request. Its methods:
 | `get(agentId)` | Returns the Agent with its `etag`. |
 | `update(agentId, { name?, sessionDefaults? }, { ifMatch })` | `sessionDefaults` replaces the stored defaults as a whole. A stale `ifMatch` is `ConflictError` (`precondition_failed`). |
 | `delete(agentId)` | Sessions created through the Agent remain. |
-| `createSession(agentId, { idempotencyKey, model?, realtimeModel?, billingTag?, tools? })` | Returns a `Session`. The choices apply over the Agent's defaults. |
+| `createSession(agentId, { idempotencyKey, model?, realtimeModel?, realtimeVoice?, billingTag?, tools? })` | Returns a `Session`. The choices apply over the Agent's defaults; `realtimeVoice: null` drops the Agent's voice so the Session speaks the default voice. |
 | `listSessions(agentId, { limit, cursor })` | The Sessions created through the Agent that still exist, as a `SessionPage`. |
 
 `sessionDefaults` are the `createSession` options without `idempotencyKey`,
@@ -1400,7 +1409,7 @@ packed artifact in a clean ESM TypeScript consumer. To verify the packed SDK and
 its examples against the real service, use the service's Node.js 26 runtime, install its
 pinned dependencies, generate Prisma, build its Hardware contract and prepare its
 current schema in a **dedicated test database**. See the selected service's
-[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7/docs/prisma-first-tidb-validation-and-rollout.md).
+[current-schema setup](https://github.com/mem9-ai/agent-stack/blob/7eabff7c48143ecd83161040ed95d79fa2d78ad5/docs/prisma-first-tidb-validation-and-rollout.md).
 
 ```sh
 AGENT_SERVICE_ROOT=/path/to/agent-stack \
@@ -1475,7 +1484,7 @@ They cover recorded input, malformed/unsupported recordings, supplier refusals,
 model failure, active-response interruption and the installed audio example.
 The public Session projection exposes the frozen Template digest but hides the
 stored creation options. Those snapshots and active-Turn model freezing also rely
-on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
+on the selected service's [existing persistence evidence](https://github.com/mem9-ai/agent-stack/blob/7eabff7c48143ecd83161040ed95d79fa2d78ad5/test/product/sessions/sessions-withorgstore.tidb.spec.ts); SDK reads alone do not
 prove those hidden values.
 Usage cases seed controlled facts and verify both public projections, exact filters,
 paging and authority without executing messages to manufacture billing data.

@@ -55,6 +55,7 @@ async def test_session_creation_sends_the_session_options_that_replaced_agent_pr
         sandbox={"profileId": None, "workingDirectory": "work"},
         acknowledge_session_recall=True,
         realtime_model="voice-a",
+        realtime_voice="calm",
     )
     assert [call.json() for call in service.calls] == [
         {
@@ -63,6 +64,7 @@ async def test_session_creation_sends_the_session_options_that_replaced_agent_pr
             "sandbox": {"profileId": None, "workingDirectory": "work"},
             "acknowledgeSessionRecall": True,
             "realtimeModel": "voice-a",
+            "realtimeVoice": "calm",
         }
     ]
 

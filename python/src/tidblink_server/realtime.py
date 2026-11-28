@@ -51,15 +51,30 @@ class RealtimeModel(TypedDict):
     languages: list[RealtimeLanguage]
     endpointingModes: list[RealtimeEndpointingMode]
     audio: dict[str, list[RealtimeAudioFormat]]
+    #: Ids of the Realtime Voices this model speaks.
+    voices: list[str]
+
+
+class RealtimeVoice(TypedDict):
+    """A published Realtime Voice; supplier voices are never exposed."""
+
+    id: str
+    label: str
+    description: str | None
 
 
 class RealtimeModelCatalog(TypedDict):
     defaultModel: str | None
+    #: The release default voice, which every published model speaks.
+    defaultVoice: str | None
+    voices: list[RealtimeVoice]
     models: list[RealtimeModel]
 
 
 class RealtimeModelSelection(TypedDict):
     model: str | None
+    #: The selected Realtime Voice id; None speaks the release default voice.
+    voice: str | None
     revision: int
     etag: str
     #: The Session's fixed Realtime Language; None when its recipe disables Realtime.
@@ -93,6 +108,7 @@ class OpenRealtimeConnectionResult(RealtimeConnectGrant):
 def realtime_model_selection_from(session: dict[str, Any]) -> RealtimeModelSelection:
     return {
         "model": session.get("realtimeModel"),
+        "voice": session.get("realtimeVoice"),
         "revision": session.get("realtimeModelRevision"),  # type: ignore[typeddict-item]
         "etag": session.get("realtimeModelEtag"),  # type: ignore[typeddict-item]
         "language": session.get("realtimeLanguage"),
@@ -218,6 +234,8 @@ def require_realtime_model_selection_receipt(value: object, request_id: str | No
     if (
         "realtimeModel" not in value
         or not _is_nullable_string(value["realtimeModel"])
+        or "realtimeVoice" not in value
+        or not _is_nullable_string(value["realtimeVoice"])
         or not _is_integer(revision)
         or revision <= 0  # type: ignore[operator]
         or not _is_string(value.get("realtimeModelEtag"))
