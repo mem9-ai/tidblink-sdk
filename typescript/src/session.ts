@@ -371,6 +371,8 @@ export class Session {
     model: string,
     options: { ifMatch: string; signal?: AbortSignal },
   ): Promise<RealtimeModelSelection> {
+    if (typeof model !== "string" || !model || model.length > 128)
+      throw new TypeError("Realtime Model ID must contain 1-128 characters");
     return this.setRealtimeSelection({ model }, options);
   }
 
@@ -392,9 +394,16 @@ export class Session {
     const { model, voice } = selection;
     if (model === undefined && voice === undefined)
       throw new TypeError("Realtime selection requires model, voice or both");
-    if (model !== undefined && (!model || model.length > 128))
+    if (
+      model !== undefined &&
+      (typeof model !== "string" || !model || model.length > 128)
+    )
       throw new TypeError("Realtime Model ID must contain 1-128 characters");
-    if (voice !== undefined && voice !== null && (!voice || voice.length > 64))
+    if (
+      voice !== undefined &&
+      voice !== null &&
+      (typeof voice !== "string" || !voice || voice.length > 64)
+    )
       throw new TypeError("Realtime Voice ID must contain 1-64 characters");
     if (!options.ifMatch)
       throw new TypeError("Realtime Model selection requires ifMatch");

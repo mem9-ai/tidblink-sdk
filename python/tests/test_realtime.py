@@ -15,12 +15,6 @@ from tidblink_server import ConflictError, OutcomeUnknownError
 SESSION_PATH = "/api/v1/org/users/user_1/sessions/session_1"
 
 
-def request_json(request: Any) -> dict[str, Any]:
-    import json
-
-    return json.loads(request.content or b"{}")
-
-
 def realtime_connection(**overrides: Any) -> dict[str, Any]:
     return {
         "object": "realtime_connection",
@@ -155,6 +149,7 @@ async def test_set_realtime_model_treats_an_unusable_realtime_language_receipt_a
         "realtimeModel": "voice-b",
         "realtimeModelRevision": 2,
         "realtimeModelEtag": '"session_1-realtime-2"',
+        "realtimeVoice": None,
     }
     if language is not None:
         session_fields["realtimeLanguage"] = language
@@ -183,7 +178,7 @@ async def test_set_realtime_model_accepts_a_receipt_whose_session_has_realtime_d
 
 async def test_set_realtime_selection_sends_only_the_chosen_fields() -> None:
     def handler(request, service):
-        sent = request_json(request)
+        sent = service.calls[-1].json()
         return json_response(
             {
                 "session": {
@@ -216,6 +211,23 @@ async def test_set_realtime_selection_sends_only_the_chosen_fields() -> None:
         await session.set_realtime_selection(if_match=if_match)
     with pytest.raises(ValueError):
         await session.set_realtime_selection(voice="", if_match=if_match)
+
+
+@pytest.mark.parametrize("voice", [None, 123], ids=["missing", "non-text"])
+async def test_set_realtime_selection_treats_an_unusable_realtime_voice_receipt_as_an_unknown_outcome(
+    voice: object,
+) -> None:
+    session_fields: dict[str, Any] = {
+        "realtimeModel": "voice-b",
+        "realtimeModelRevision": 2,
+        "realtimeModelEtag": '"session_1-realtime-2"',
+        "realtimeLanguage": "en-US",
+    }
+    if voice is not None:
+        session_fields["realtimeVoice"] = voice
+    session, _service = session_for(lambda request, service: json_response({"session": session_fields}))
+    with pytest.raises(OutcomeUnknownError):
+        await session.set_realtime_selection(voice="calm", if_match='"session_1-realtime-1"')
 
 
 async def test_a_session_prepares_a_realtime_connection_and_returns_its_one_time_connect_grant() -> None:

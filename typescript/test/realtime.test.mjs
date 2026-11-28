@@ -478,6 +478,7 @@ for (const [label, language] of [
             realtimeModel: "voice-b",
             realtimeModelRevision: 2,
             realtimeModelEtag: '"session_1-realtime-2"',
+            realtimeVoice: null,
             ...(language === undefined ? {} : { realtimeLanguage: language }),
           },
         }),
@@ -566,3 +567,32 @@ test("setRealtimeSelection sends only the chosen fields and returns the selected
   );
   assert.equal(bodies.length, 3);
 });
+
+for (const [label, voice] of [
+  ["a missing realtimeVoice", undefined],
+  ["a non-text realtimeVoice", 123],
+]) {
+  test(`setRealtimeSelection treats a receipt with ${label} as an unknown outcome`, async () => {
+    const baseUrl = await serve(async (request, response) => {
+      for await (const _chunk of request);
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({
+          session: {
+            realtimeModel: "voice-b",
+            ...(voice === undefined ? {} : { realtimeVoice: voice }),
+            realtimeModelRevision: 2,
+            realtimeModelEtag: '"session_1-realtime-2"',
+            realtimeLanguage: "en-US",
+          },
+        }),
+      );
+    });
+    await assert.rejects(
+      clientFor(baseUrl)
+        .session("session_1")
+        .setRealtimeSelection({ voice: "calm" }, { ifMatch: '"session_1-realtime-1"' }),
+      (error) => error.name === "OutcomeUnknownError",
+    );
+  });
+}

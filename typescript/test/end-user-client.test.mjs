@@ -37,6 +37,7 @@ test("Session creation recovers through the caller's stable identity", async () 
   const session = await user.createSession({
     templateId: "template_1",
     idempotencyKey: "create-session-1",
+    realtimeVoice: "calm",
   });
   assert.equal(session.id, "session_1");
   assert.equal(calls.length, 2);
@@ -47,7 +48,7 @@ test("Session creation recovers through the caller's stable identity", async () 
   for (const call of calls) {
     assert.equal(call.url, "/api/v1/org/users/user_1/sessions");
     assert.equal(call.headers["idempotency-key"], "create-session-1");
-    assert.deepEqual(call.body, { agentTemplateId: "template_1" });
+    assert.deepEqual(call.body, { agentTemplateId: "template_1", realtimeVoice: "calm" });
   }
 });
 

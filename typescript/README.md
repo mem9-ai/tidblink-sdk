@@ -1364,7 +1364,7 @@ sends no request. Its methods:
 | `get(agentId)` | Returns the Agent with its `etag`. |
 | `update(agentId, { name?, sessionDefaults? }, { ifMatch })` | `sessionDefaults` replaces the stored defaults as a whole. A stale `ifMatch` is `ConflictError` (`precondition_failed`). |
 | `delete(agentId)` | Sessions created through the Agent remain. |
-| `createSession(agentId, { idempotencyKey, model?, realtimeModel?, billingTag?, tools? })` | Returns a `Session`. The choices apply over the Agent's defaults. |
+| `createSession(agentId, { idempotencyKey, model?, realtimeModel?, realtimeVoice?, billingTag?, tools? })` | Returns a `Session`. The choices apply over the Agent's defaults; `realtimeVoice: null` drops the Agent's voice so the Session speaks the default voice. |
 | `listSessions(agentId, { limit, cursor })` | The Sessions created through the Agent that still exist, as a `SessionPage`. |
 
 `sessionDefaults` are the `createSession` options without `idempotencyKey`,

@@ -193,6 +193,7 @@ async def test_create_session_returns_an_ordinary_session_of_the_end_user() -> N
         "agent_1",
         idempotency_key="agent-session-1",
         model="model_1",
+        realtime_voice=None,
         billing_tag={"key": "agent", "value": "support"},
         tools=tools,
     )
@@ -201,7 +202,13 @@ async def test_create_session_returns_an_ordinary_session_of_the_end_user() -> N
     for call in service.calls[:2]:
         assert (call.method, call.path) == ("POST", f"{AGENTS}/agent_1/sessions")
         assert call.headers["idempotency-key"] == "agent-session-1"
-        assert call.json() == {"model": "model_1", "billingTag": {"key": "agent", "value": "support"}, "tools": tools}
+        # None drops the Agent's voice.
+        assert call.json() == {
+            "model": "model_1",
+            "realtimeVoice": None,
+            "billingTag": {"key": "agent", "value": "support"},
+            "tools": tools,
+        }
     await session.refresh()
     assert service.calls[2].path == "/api/v1/org/users/user_1/sessions/session_1"
 
