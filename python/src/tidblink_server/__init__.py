@@ -182,6 +182,7 @@ from .realtime import (
     RealtimeModel,
     RealtimeModelCatalog,
     RealtimeModelSelection,
+    RealtimeVoice,
     RealtimeOpenAudio,
     RealtimeOpusAudioFormat,
     RealtimePcm16AudioFormat,
@@ -194,9 +195,9 @@ from .user import AgentModelCatalog, AgentTemplate, AgentTemplatePage, EndUserCl
 #: TiDB Link OpenAPI version supported by this SDK release.
 TIDB_LINK_API_VERSION = "0.0.1"
 #: Exact service baseline for the supported SDK surface.
-TIDB_LINK_REVISION = "c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7"
+TIDB_LINK_REVISION = "7eabff7c48143ecd83161040ed95d79fa2d78ad5"
 #: SHA-256 of that service revision's ``docs/openapi.yaml``.
-TIDB_LINK_OPENAPI_SHA256 = "f3ed7342d8156d191d9756d99329d62ef549d05b369cca27c938f0eb973f3269"
+TIDB_LINK_OPENAPI_SHA256 = "991a214f301484580bb98763d3c7fc9530aea343261d42103f2987b5d0e53d7c"
 
 __all__ = [
     "OMIT",
@@ -235,6 +236,7 @@ __all__ = [
     "RealtimeConnection",
     "RealtimeModelCatalog",
     "RealtimeModelSelection",
+    "RealtimeVoice",
     "TiDBLinkError",
     "TiDBLinkApiError",
     "ConflictError",

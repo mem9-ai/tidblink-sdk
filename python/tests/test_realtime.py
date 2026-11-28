@@ -77,6 +77,7 @@ async def test_a_session_reads_and_conditionally_changes_its_independent_realtim
             "realtimeModel": "voice-a",
             "realtimeModelRevision": 1,
             "realtimeModelEtag": '"session_1-realtime-1"',
+            "realtimeVoice": None,
             "realtimeLanguage": "en-US",
             **overrides,
         }
@@ -103,6 +104,7 @@ async def test_a_session_reads_and_conditionally_changes_its_independent_realtim
     current = await session.get_realtime_model_selection()
     assert current == {
         "model": "voice-a",
+        "voice": None,
         "revision": 1,
         "etag": '"session_1-realtime-1"',
         "language": "en-US",
@@ -110,6 +112,7 @@ async def test_a_session_reads_and_conditionally_changes_its_independent_realtim
     updated = await session.set_realtime_model("voice-b", if_match=current["etag"])
     assert updated == {
         "model": "voice-b",
+        "voice": None,
         "revision": 2,
         "etag": '"session_1-realtime-2"',
         "language": "en-US",
@@ -146,6 +149,7 @@ async def test_set_realtime_model_treats_an_unusable_realtime_language_receipt_a
         "realtimeModel": "voice-b",
         "realtimeModelRevision": 2,
         "realtimeModelEtag": '"session_1-realtime-2"',
+        "realtimeVoice": None,
     }
     if language is not None:
         session_fields["realtimeLanguage"] = language
@@ -159,15 +163,71 @@ async def test_set_realtime_model_accepts_a_receipt_whose_session_has_realtime_d
         "realtimeModel": "voice-b",
         "realtimeModelRevision": 2,
         "realtimeModelEtag": '"session_1-realtime-2"',
+        "realtimeVoice": None,
         "realtimeLanguage": None,
     }
     session, _service = session_for(lambda request, service: json_response({"session": session_fields}))
     assert await session.set_realtime_model("voice-b", if_match='"session_1-realtime-1"') == {
         "model": "voice-b",
+        "voice": None,
         "revision": 2,
         "etag": '"session_1-realtime-2"',
         "language": None,
     }
+
+
+async def test_set_realtime_selection_sends_only_the_chosen_fields() -> None:
+    def handler(request, service):
+        sent = service.calls[-1].json()
+        return json_response(
+            {
+                "session": {
+                    "realtimeModel": sent.get("realtimeModel", "voice-a"),
+                    "realtimeVoice": sent["realtimeVoice"] if "realtimeVoice" in sent else "calm",
+                    "realtimeModelRevision": 2,
+                    "realtimeModelEtag": '"session_1-realtime-2"',
+                    "realtimeLanguage": "en-US",
+                }
+            }
+        )
+
+    session, service = session_for(handler)
+    if_match = '"session_1-realtime-1"'
+    assert await session.set_realtime_selection(voice="calm", if_match=if_match) == {
+        "model": "voice-a",
+        "voice": "calm",
+        "revision": 2,
+        "etag": '"session_1-realtime-2"',
+        "language": "en-US",
+    }
+    await session.set_realtime_selection(model="voice-b", voice=None, if_match=if_match)
+    await session.set_realtime_model("voice-b", if_match=if_match)
+    assert [call.json() for call in service.calls] == [
+        {"realtimeVoice": "calm"},
+        {"realtimeModel": "voice-b", "realtimeVoice": None},
+        {"realtimeModel": "voice-b"},
+    ]
+    with pytest.raises(ValueError):
+        await session.set_realtime_selection(if_match=if_match)
+    with pytest.raises(ValueError):
+        await session.set_realtime_selection(voice="", if_match=if_match)
+
+
+@pytest.mark.parametrize("voice", [None, 123], ids=["missing", "non-text"])
+async def test_set_realtime_selection_treats_an_unusable_realtime_voice_receipt_as_an_unknown_outcome(
+    voice: object,
+) -> None:
+    session_fields: dict[str, Any] = {
+        "realtimeModel": "voice-b",
+        "realtimeModelRevision": 2,
+        "realtimeModelEtag": '"session_1-realtime-2"',
+        "realtimeLanguage": "en-US",
+    }
+    if voice is not None:
+        session_fields["realtimeVoice"] = voice
+    session, _service = session_for(lambda request, service: json_response({"session": session_fields}))
+    with pytest.raises(OutcomeUnknownError):
+        await session.set_realtime_selection(voice="calm", if_match='"session_1-realtime-1"')
 
 
 async def test_a_session_prepares_a_realtime_connection_and_returns_its_one_time_connect_grant() -> None:

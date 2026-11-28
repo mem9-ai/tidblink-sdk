@@ -96,6 +96,8 @@ export interface CreateSessionOptions extends RequestOptions {
   idempotencyKey: string;
   model?: string;
   realtimeModel?: string;
+  /** A Realtime Voice the selected (or default) Realtime Model speaks; omitted speaks the default voice. */
+  realtimeVoice?: string;
   billingTag?: BillingTag | null;
   tools?: ClientToolDeclaration[];
   /** Added to the Template instructions for this Session only; at most 4096 UTF-8 bytes. */
@@ -130,6 +132,7 @@ export interface SessionRecord {
   model: SessionModel;
   modelRevision: number;
   realtimeModel: string | null;
+  realtimeVoice: string | null;
   realtimeModelRevision: number;
   realtimeModelEtag: string;
   realtimeLanguage: import("./realtime.js").RealtimeLanguage | null;
@@ -363,22 +366,53 @@ export class Session {
     return realtimeModelSelectionFrom(response.session);
   }
 
+  /** Selects only the Realtime Model; the voice is kept and must be one the model speaks. */
   async setRealtimeModel(
     model: string,
     options: { ifMatch: string; signal?: AbortSignal },
   ): Promise<RealtimeModelSelection> {
+    if (typeof model !== "string" || !model || model.length > 128)
+      throw new TypeError("Realtime Model ID must contain 1-128 characters");
+    return this.setRealtimeSelection({ model }, options);
+  }
+
+  /**
+   * Selects the Realtime Model, the Realtime Voice or both under one revision. An omitted field keeps its value;
+   * `voice: null` returns to the release default voice. The resulting model must speak the resulting voice, or the
+   * service refuses with `realtime_voice_unsupported`.
+   */
+  async setRealtimeSelection(
+    selection: { model?: string; voice?: string | null },
+    options: { ifMatch: string; signal?: AbortSignal },
+  ): Promise<RealtimeModelSelection> {
+    requireKnownKeys(selection, ["model", "voice"], "Realtime selection");
     requireKnownKeys(
       options,
       ["ifMatch", "signal"],
       "Realtime Model selection options",
     );
-    if (!model || model.length > 128)
+    const { model, voice } = selection;
+    if (model === undefined && voice === undefined)
+      throw new TypeError("Realtime selection requires model, voice or both");
+    if (
+      model !== undefined &&
+      (typeof model !== "string" || !model || model.length > 128)
+    )
       throw new TypeError("Realtime Model ID must contain 1-128 characters");
+    if (
+      voice !== undefined &&
+      voice !== null &&
+      (typeof voice !== "string" || !voice || voice.length > 64)
+    )
+      throw new TypeError("Realtime Voice ID must contain 1-64 characters");
     if (!options.ifMatch)
       throw new TypeError("Realtime Model selection requires ifMatch");
     const result = await this.#http.patchResponse<unknown>(
       `/sessions/${encodeURIComponent(this.id)}/realtime-model`,
-      { realtimeModel: model },
+      {
+        ...(model !== undefined ? { realtimeModel: model } : {}),
+        ...(voice !== undefined ? { realtimeVoice: voice } : {}),
+      },
       {
         ifMatch: options.ifMatch,
         outcomeUnknown: true,
@@ -533,6 +567,7 @@ export const createSession = async (
       "idempotencyKey",
       "model",
       "realtimeModel",
+      "realtimeVoice",
       "billingTag",
       "tools",
       "additionalInstructions",

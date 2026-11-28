@@ -48,28 +48,41 @@ const realtimeSettings = (model: string) => ({
   vadThreshold: null,
   vadSilenceDurationMs: null,
 });
+const voice = (id: string, supplierVoice: string) => ({
+  id,
+  label: id === "default" ? "Default" : "Calm",
+  description: null,
+  supplierVoice,
+});
 const realtimeModels = [
   {
     id: "voice-a",
     label: "Voice A",
     settings: realtimeSettings("provider-a"),
     available: true,
+    voices: [voice("default", "Cherry"), voice("calm", "Ethan")],
   },
   {
     id: "voice-b",
     label: "Voice B",
     settings: realtimeSettings("provider-b"),
     available: true,
+    voices: [voice("default", "Serena")],
   },
   {
     id: "voice-unavailable",
     label: "Unavailable voice",
     settings: realtimeSettings("provider-unavailable"),
     available: false,
+    voices: [voice("default", "Cherry")],
   },
 ];
 const realtimeSource = {
-  list: async () => ({ models: realtimeModels, defaultModelId: "voice-a" }),
+  list: async () => ({
+    models: realtimeModels,
+    defaultModelId: "voice-a",
+    defaultVoiceId: "default",
+  }),
   current: async () => realtimeModels[0].settings,
   readiness: async () => "configured" as const,
   // Template switches pin the Session's Realtime capability; this catalog has no release.

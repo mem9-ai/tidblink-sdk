@@ -722,7 +722,7 @@
             }
           },
           "409": {
-            "description": "The Idempotency-Key conflicts, cross-Session Recall requires acknowledgment (agent_template_recall_acknowledgment_required), the model provider is unconfigured, the Realtime Model is unavailable (realtime_model_unavailable), Realtime is disabled (realtime_not_enabled), or combined instructions exceed 16 KiB (agent_instructions_too_large).",
+            "description": "The Idempotency-Key conflicts, cross-Session Recall requires acknowledgment (agent_template_recall_acknowledgment_required), the model provider is unconfigured, the Realtime Model is unavailable (realtime_model_unavailable), it does not speak the selected Realtime Voice (realtime_voice_unsupported), Realtime is disabled (realtime_not_enabled), or combined instructions exceed 16 KiB (agent_instructions_too_large).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1152,7 +1152,7 @@
             }
           },
           "409": {
-            "description": "realtime_model_unavailable, realtime_not_enabled or session_read_only.",
+            "description": "realtime_model_unavailable, realtime_voice_unsupported (the resulting model does not speak the resulting voice), realtime_not_enabled or session_read_only.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2473,7 +2473,7 @@
             }
           },
           "409": {
-            "description": "realtime_connection_live, session_read_only, session_switch_in_progress, realtime_not_enabled, realtime_model_unavailable, realtime_language_unsupported.",
+            "description": "realtime_connection_live, session_read_only, session_switch_in_progress, realtime_not_enabled, realtime_model_unavailable, realtime_voice_unavailable, realtime_voice_unsupported, realtime_language_unsupported.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4218,6 +4218,12 @@
             "minLength": 1,
             "maxLength": 128
           },
+          "realtimeVoice": {
+            "description": "A Realtime Voice from the Realtime Model catalog that the selected (or default) Realtime Model speaks; omitted speaks the release default voice.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
           "billingTag": {
             "nullable": true,
             "description": "One immutable Billing Tag snapshot for this resource. Null means untagged; request fields may be omitted only where the operation documents inheritance.",
@@ -4520,6 +4526,8 @@
                   "realtime_connection_live",
                   "realtime_model_conflict",
                   "realtime_model_unavailable",
+                  "realtime_voice_unavailable",
+                  "realtime_voice_unsupported",
                   "realtime_not_enabled",
                   "realtime_language_unsupported",
                   "realtime_language_unavailable",
@@ -7014,6 +7022,35 @@
             "type": "string",
             "nullable": true
           },
+          "defaultVoice": {
+            "description": "The release default Realtime Voice, which every published model speaks.",
+            "type": "string",
+            "nullable": true
+          },
+          "voices": {
+            "description": "Published Realtime Voices; a Session selects one by id as realtimeVoice.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "description"
+              ]
+            }
+          },
           "models": {
             "type": "array",
             "items": {
@@ -7227,6 +7264,13 @@
                     "input",
                     "output"
                   ]
+                },
+                "voices": {
+                  "description": "Ids of the Realtime Voices this model speaks.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "required": [
@@ -7236,13 +7280,16 @@
                 "isDefault",
                 "languages",
                 "endpointingModes",
-                "audio"
+                "audio",
+                "voices"
               ]
             }
           }
         },
         "required": [
           "defaultModel",
+          "defaultVoice",
+          "voices",
           "models"
         ]
       },
@@ -7987,6 +8034,11 @@
                 "type": "string",
                 "nullable": true
               },
+              "realtimeVoice": {
+                "description": "Realtime Voice for the next Realtime Connection; null speaks the release default voice. It shares realtimeModelRevision with realtimeModel.",
+                "type": "string",
+                "nullable": true
+              },
               "realtimeModelRevision": {
                 "type": "integer",
                 "minimum": 0,
@@ -8295,6 +8347,7 @@
               "model",
               "modelRevision",
               "realtimeModel",
+              "realtimeVoice",
               "realtimeModelRevision",
               "realtimeModelEtag",
               "configurationEpoch",
@@ -10689,6 +10742,11 @@
                   "type": "string",
                   "nullable": true
                 },
+                "realtimeVoice": {
+                  "description": "Realtime Voice for the next Realtime Connection; null speaks the release default voice. It shares realtimeModelRevision with realtimeModel.",
+                  "type": "string",
+                  "nullable": true
+                },
                 "realtimeModelRevision": {
                   "type": "integer",
                   "minimum": 0,
@@ -10997,6 +11055,7 @@
                 "model",
                 "modelRevision",
                 "realtimeModel",
+                "realtimeVoice",
                 "realtimeModelRevision",
                 "realtimeModelEtag",
                 "configurationEpoch",
@@ -11105,6 +11164,11 @@
               },
               "realtimeModel": {
                 "description": "Selection for the next Realtime Connection; null uses the active release default.",
+                "type": "string",
+                "nullable": true
+              },
+              "realtimeVoice": {
+                "description": "Realtime Voice for the next Realtime Connection; null speaks the release default voice. It shares realtimeModelRevision with realtimeModel.",
                 "type": "string",
                 "nullable": true
               },
@@ -11416,6 +11480,7 @@
               "model",
               "modelRevision",
               "realtimeModel",
+              "realtimeVoice",
               "realtimeModelRevision",
               "realtimeModelEtag",
               "configurationEpoch",
@@ -14478,11 +14543,15 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 128
+          },
+          "realtimeVoice": {
+            "description": "Omitted keeps the current voice; null selects the release default voice.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "nullable": true
           }
-        },
-        "required": [
-          "realtimeModel"
-        ]
+        }
       },
       "UserInputTurn": {
         "type": "object",

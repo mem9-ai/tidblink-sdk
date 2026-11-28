@@ -2,7 +2,7 @@
 export const TIDB_LINK_API_VERSION = "0.0.1" as const;
 /** Exact service baseline for the supported refreshed SDK surface. */
 export const TIDB_LINK_REVISION =
-  "c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7" as const;
+  "7eabff7c48143ecd83161040ed95d79fa2d78ad5" as const;
 
 export {
   TiDBLinkApiError,
@@ -113,6 +113,7 @@ export type {
   RealtimeModel,
   RealtimeModelCatalog,
   RealtimeModelSelection,
+  RealtimeVoice,
   RealtimeOpusAudioFormat,
   RealtimePcm16AudioFormat,
 } from "./realtime.js";
