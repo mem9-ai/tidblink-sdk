@@ -120,8 +120,11 @@ test("Session creation through an Agent takes only per-Session choices and retur
     "billingTag",
     "model",
     "realtimeModel",
+    "realtimeVoice",
     "tools",
   ]);
+  // A null voice override drops the Agent's voice.
+  assert.equal(choices.properties.realtimeVoice.nullable, true);
   const created = success(contract, contract.paths[sessions].post, "201");
   assert.deepEqual(Object.keys(created.properties).sort(), ["agentId", "session"]);
   const session = success(

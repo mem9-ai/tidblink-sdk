@@ -28,19 +28,33 @@ export interface RealtimeModel {
   isDefault: boolean;
   languages: RealtimeLanguage[];
   endpointingModes: RealtimeEndpointingMode[];
+  /** Ids of the Realtime Voices this model speaks. */
+  voices: string[];
   audio: {
     input: RealtimeAudioFormat[];
     output: RealtimeAudioFormat[];
   };
 }
 
+/** A published Realtime Voice. Supplier voices are never exposed. */
+export interface RealtimeVoice {
+  id: string;
+  label: string;
+  description: string | null;
+}
+
 export interface RealtimeModelCatalog {
   defaultModel: string | null;
+  /** The release default voice, which every published model speaks. */
+  defaultVoice: string | null;
+  voices: RealtimeVoice[];
   models: RealtimeModel[];
 }
 
 export interface RealtimeModelSelection {
   model: string | null;
+  /** The selected Realtime Voice id; `null` speaks the release default voice. */
+  voice: string | null;
   revision: number;
   etag: string;
   /** The Session's fixed Realtime Language; `null` when its recipe disables Realtime. */
@@ -49,6 +63,7 @@ export interface RealtimeModelSelection {
 
 export interface RealtimeSessionSelectionFields {
   realtimeModel: string | null;
+  realtimeVoice: string | null;
   realtimeModelRevision: number;
   realtimeModelEtag: string;
   realtimeLanguage: RealtimeLanguage | null;
@@ -58,6 +73,7 @@ export const realtimeModelSelectionFrom = (
   session: RealtimeSessionSelectionFields,
 ): RealtimeModelSelection => ({
   model: session.realtimeModel,
+  voice: session.realtimeVoice,
   revision: session.realtimeModelRevision,
   etag: session.realtimeModelEtag,
   language: session.realtimeLanguage,
@@ -205,6 +221,7 @@ export const requireRealtimeModelSelectionReceipt = (
   const language = value.realtimeLanguage;
   if (
     !isNullableString(value.realtimeModel) ||
+    !isNullableString(value.realtimeVoice) ||
     !Number.isInteger(value.realtimeModelRevision) ||
     !isNumber(value.realtimeModelRevision) ||
     value.realtimeModelRevision <= 0 ||

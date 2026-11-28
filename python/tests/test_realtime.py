@@ -15,6 +15,12 @@ from tidblink_server import ConflictError, OutcomeUnknownError
 SESSION_PATH = "/api/v1/org/users/user_1/sessions/session_1"
 
 
+def request_json(request: Any) -> dict[str, Any]:
+    import json
+
+    return json.loads(request.content or b"{}")
+
+
 def realtime_connection(**overrides: Any) -> dict[str, Any]:
     return {
         "object": "realtime_connection",
@@ -77,6 +83,7 @@ async def test_a_session_reads_and_conditionally_changes_its_independent_realtim
             "realtimeModel": "voice-a",
             "realtimeModelRevision": 1,
             "realtimeModelEtag": '"session_1-realtime-1"',
+            "realtimeVoice": None,
             "realtimeLanguage": "en-US",
             **overrides,
         }
@@ -103,6 +110,7 @@ async def test_a_session_reads_and_conditionally_changes_its_independent_realtim
     current = await session.get_realtime_model_selection()
     assert current == {
         "model": "voice-a",
+        "voice": None,
         "revision": 1,
         "etag": '"session_1-realtime-1"',
         "language": "en-US",
@@ -110,6 +118,7 @@ async def test_a_session_reads_and_conditionally_changes_its_independent_realtim
     updated = await session.set_realtime_model("voice-b", if_match=current["etag"])
     assert updated == {
         "model": "voice-b",
+        "voice": None,
         "revision": 2,
         "etag": '"session_1-realtime-2"',
         "language": "en-US",
@@ -159,15 +168,54 @@ async def test_set_realtime_model_accepts_a_receipt_whose_session_has_realtime_d
         "realtimeModel": "voice-b",
         "realtimeModelRevision": 2,
         "realtimeModelEtag": '"session_1-realtime-2"',
+        "realtimeVoice": None,
         "realtimeLanguage": None,
     }
     session, _service = session_for(lambda request, service: json_response({"session": session_fields}))
     assert await session.set_realtime_model("voice-b", if_match='"session_1-realtime-1"') == {
         "model": "voice-b",
+        "voice": None,
         "revision": 2,
         "etag": '"session_1-realtime-2"',
         "language": None,
     }
+
+
+async def test_set_realtime_selection_sends_only_the_chosen_fields() -> None:
+    def handler(request, service):
+        sent = request_json(request)
+        return json_response(
+            {
+                "session": {
+                    "realtimeModel": sent.get("realtimeModel", "voice-a"),
+                    "realtimeVoice": sent["realtimeVoice"] if "realtimeVoice" in sent else "calm",
+                    "realtimeModelRevision": 2,
+                    "realtimeModelEtag": '"session_1-realtime-2"',
+                    "realtimeLanguage": "en-US",
+                }
+            }
+        )
+
+    session, service = session_for(handler)
+    if_match = '"session_1-realtime-1"'
+    assert await session.set_realtime_selection(voice="calm", if_match=if_match) == {
+        "model": "voice-a",
+        "voice": "calm",
+        "revision": 2,
+        "etag": '"session_1-realtime-2"',
+        "language": "en-US",
+    }
+    await session.set_realtime_selection(model="voice-b", voice=None, if_match=if_match)
+    await session.set_realtime_model("voice-b", if_match=if_match)
+    assert [call.json() for call in service.calls] == [
+        {"realtimeVoice": "calm"},
+        {"realtimeModel": "voice-b", "realtimeVoice": None},
+        {"realtimeModel": "voice-b"},
+    ]
+    with pytest.raises(ValueError):
+        await session.set_realtime_selection(if_match=if_match)
+    with pytest.raises(ValueError):
+        await session.set_realtime_selection(voice="", if_match=if_match)
 
 
 async def test_a_session_prepares_a_realtime_connection_and_returns_its_one_time_connect_grant() -> None:

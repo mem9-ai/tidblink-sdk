@@ -55,18 +55,17 @@ it("an independent installed SDK consumer uses Organization authority against th
           provider: "bailian_qwen_omni",
           region: "cn-beijing",
           workspaceId: "ws-sdk-controlled",
-          models: [
-            {
-              realtimeModelId: "voice-a",
-              label: "Controlled voice",
-              model: "qwen3.5-omni-plus-realtime",
-              voice: null,
-              turnDetection: null,
-              vadThreshold: null,
-              vadSilenceDurationMs: null,
-            },
-          ],
         },
+        models: [
+          {
+            realtimeModelId: "voice-a",
+            label: "Controlled voice",
+            model: "qwen3.5-omni-plus-realtime",
+            turnDetection: null,
+            vadThreshold: null,
+            vadSilenceDurationMs: null,
+          },
+        ],
       },
     });
     const organizationId = harness.fixtures.organization.id;

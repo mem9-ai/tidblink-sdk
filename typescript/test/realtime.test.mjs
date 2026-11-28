@@ -89,6 +89,7 @@ test("a Session reads and conditionally changes its independent Realtime Model s
     realtimeModel: "voice-a",
     realtimeModelRevision: 1,
     realtimeModelEtag: '"session_1-realtime-1"',
+    realtimeVoice: null,
     realtimeLanguage: "en-US",
     ...overrides,
   });
@@ -138,6 +139,7 @@ test("a Session reads and conditionally changes its independent Realtime Model s
   const current = await session.getRealtimeModelSelection();
   assert.deepEqual(current, {
     model: "voice-a",
+    voice: null,
     revision: 1,
     etag: '"session_1-realtime-1"',
     language: "en-US",
@@ -147,6 +149,7 @@ test("a Session reads and conditionally changes its independent Realtime Model s
   });
   assert.deepEqual(updated, {
     model: "voice-b",
+    voice: null,
     revision: 2,
     etag: '"session_1-realtime-2"',
     language: "en-US",
@@ -499,6 +502,7 @@ test("setRealtimeModel accepts a receipt whose Session has Realtime disabled", a
           realtimeModel: "voice-b",
           realtimeModelRevision: 2,
           realtimeModelEtag: '"session_1-realtime-2"',
+          realtimeVoice: null,
           realtimeLanguage: null,
         },
       }),
@@ -508,6 +512,57 @@ test("setRealtimeModel accepts a receipt whose Session has Realtime disabled", a
     await clientFor(baseUrl)
       .session("session_1")
       .setRealtimeModel("voice-b", { ifMatch: '"session_1-realtime-1"' }),
-    { model: "voice-b", revision: 2, etag: '"session_1-realtime-2"', language: null },
+    {
+      model: "voice-b",
+      voice: null,
+      revision: 2,
+      etag: '"session_1-realtime-2"',
+      language: null,
+    },
   );
+});
+
+test("setRealtimeSelection sends only the chosen fields and returns the selected voice", async () => {
+  const bodies = [];
+  const baseUrl = await serve(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const sent = JSON.parse(body);
+    bodies.push(sent);
+    response.setHeader("content-type", "application/json");
+    response.end(
+      JSON.stringify({
+        session: {
+          realtimeModel: sent.realtimeModel ?? "voice-a",
+          realtimeVoice: "realtimeVoice" in sent ? sent.realtimeVoice : "calm",
+          realtimeModelRevision: 2,
+          realtimeModelEtag: '"session_1-realtime-2"',
+          realtimeLanguage: "en-US",
+        },
+      }),
+    );
+  });
+  const session = clientFor(baseUrl).session("session_1");
+  const ifMatch = '"session_1-realtime-1"';
+  assert.deepEqual(await session.setRealtimeSelection({ voice: "calm" }, { ifMatch }), {
+    model: "voice-a",
+    voice: "calm",
+    revision: 2,
+    etag: '"session_1-realtime-2"',
+    language: "en-US",
+  });
+  await session.setRealtimeSelection({ model: "voice-b", voice: null }, { ifMatch });
+  await session.setRealtimeModel("voice-b", { ifMatch });
+  assert.deepEqual(bodies, [
+    { realtimeVoice: "calm" },
+    { realtimeModel: "voice-b", realtimeVoice: null },
+    { realtimeModel: "voice-b" },
+  ]);
+  await assert.rejects(session.setRealtimeSelection({}, { ifMatch }), TypeError);
+  await assert.rejects(session.setRealtimeSelection({ voice: "" }, { ifMatch }), TypeError);
+  await assert.rejects(
+    session.setRealtimeSelection({ voice: "calm", extra: 1 }, { ifMatch }),
+    TypeError,
+  );
+  assert.equal(bodies.length, 3);
 });

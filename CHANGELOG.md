@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- Align with service
+  [7eabff7c](https://github.com/mem9-ai/agent-stack/commit/7eabff7c48143ecd83161040ed95d79fa2d78ad5),
+  OpenAPI SHA-256
+  `991a214f301484580bb98763d3c7fc9530aea343261d42103f2987b5d0e53d7c`, which
+  lets a Session select its Realtime Voice (ADR 0117). The frozen subsets
+  change only by the voice fields, the new refusal codes and descriptions.
+- Sessions carry `realtimeVoice: string | null` (null speaks the release
+  default voice), and `RealtimeModelSelection` carries `voice`.
+  `createSession({ realtimeVoice })` selects one at creation.
+- `session.setRealtimeSelection({ model?, voice? }, { ifMatch })` changes the
+  Realtime Model, the voice or both under one revision; an omitted field keeps
+  its value and `voice: null` returns to the default voice. The service
+  refuses a pair the model does not speak with `realtime_voice_unsupported`.
+  `setRealtimeModel(model, { ifMatch })` stays as the model-only form and keeps
+  the current voice. Opening a connection may also be refused with
+  `realtime_voice_unavailable` or `realtime_voice_unsupported`; neither falls
+  back to the default voice.
+- `listRealtimeModels()` returns `voices` (`RealtimeVoice`: `id`, `label`,
+  `description`), `defaultVoice` and each model's `voices` ids. Supplier
+  voices are never exposed. A `setRealtimeModel` or `setRealtimeSelection`
+  receipt without a valid `realtimeVoice` is an unknown outcome.
+- The Python SDK makes the same changes, with `set_realtime_selection(model=,
+  voice=, if_match=)` and `create_session(realtime_voice=)`.
+
+### Gated features
+
+- `agents(user).createSession(agentId, { realtimeVoice })` overrides the
+  Agent's voice; `null` drops it so the Session speaks the default voice.
+  Agent `sessionDefaults` may store `realtimeVoice`.
+
 ## 0.6.0-rc.0
 
 Prerelease on the `next` dist-tag. It breaks 0.5: see the Session language

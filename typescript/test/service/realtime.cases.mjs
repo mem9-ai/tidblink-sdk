@@ -72,11 +72,23 @@ test("the installed SDK discovers, selects and manages Realtime Connections", as
     ),
   );
   assert.equal(JSON.stringify(catalog).includes("fictional-sdk-workspace"), false);
+  // Voices are published by id and label; supplier voices never reach the SDK.
+  assert.equal(catalog.defaultVoice, "default");
+  assert.deepEqual(
+    catalog.voices.map(({ id }) => id),
+    ["default", "calm"],
+  );
+  assert.deepEqual(
+    catalog.models.find((model) => model.id === "voice-a").voices,
+    ["default", "calm"],
+  );
+  assert.equal(JSON.stringify(catalog).includes("Ethan"), false);
 
   const session = user.session(sessionId);
   const initial = await session.getRealtimeModelSelection();
   assert.deepEqual(initial, {
     model: "voice-a",
+    voice: null,
     revision: 1,
     etag: initial.etag,
     language: "en-US",
@@ -115,12 +127,27 @@ test("the installed SDK discovers, selects and manages Realtime Connections", as
     textTokens: 0,
   });
 
-  const selected = await session.setRealtimeModel("voice-b", {
-    ifMatch: initial.etag,
-  });
+  // A voice the model speaks is selected; a model that does not speak it is then refused.
+  const calm = await session.setRealtimeSelection(
+    { voice: "calm" },
+    { ifMatch: initial.etag },
+  );
+  assert.deepEqual(
+    { model: calm.model, voice: calm.voice, revision: calm.revision },
+    { model: "voice-a", voice: "calm", revision: initial.revision + 1 },
+  );
+  await assert.rejects(
+    session.setRealtimeModel("voice-b", { ifMatch: calm.etag }),
+    refusal(409, "realtime_voice_unsupported"),
+  );
+  const selected = await session.setRealtimeSelection(
+    { model: "voice-b", voice: null },
+    { ifMatch: calm.etag },
+  );
   assert.equal(selected.model, "voice-b");
-  assert.equal(selected.revision, initial.revision + 1);
-  assert.notEqual(selected.etag, initial.etag);
+  assert.equal(selected.voice, null);
+  assert.equal(selected.revision, calm.revision + 1);
+  assert.notEqual(selected.etag, calm.etag);
   await assert.rejects(
     session.setRealtimeModel("voice-a", { ifMatch: initial.etag }),
     (error) =>

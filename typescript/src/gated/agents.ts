@@ -85,7 +85,10 @@ export type CreateAgentSessionOptions = Pick<
   | "tools"
   | "signal"
   | "requestId"
->;
+> & {
+  /** Overrides the Agent's voice; `null` drops it so the Session speaks the default voice. */
+  realtimeVoice?: string | null;
+};
 
 type WireSessionDefaults = Omit<AgentSessionDefaults, "templateId"> & {
   agentTemplateId: string;
@@ -98,6 +101,7 @@ const SESSION_DEFAULT_KEYS = [
   "templateId",
   "model",
   "realtimeModel",
+  "realtimeVoice",
   "billingTag",
   "additionalInstructions",
   "sandbox",
@@ -277,6 +281,7 @@ export class Agents {
         "idempotencyKey",
         "model",
         "realtimeModel",
+        "realtimeVoice",
         "billingTag",
         "tools",
         "signal",
