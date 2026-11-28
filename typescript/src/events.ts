@@ -1,5 +1,6 @@
 import type { TemplateSwitchStatus } from "./template-switch.js";
 import { TiDBLinkError } from "./errors.js";
+import { isByteSize } from "./http.js";
 import type { ClarificationItem } from "./session.js";
 import type { RealtimeResponseKind, SessionRealtimeEvent } from "./history.js";
 
@@ -51,6 +52,54 @@ export type TurnProgressEvent = KnownEvent<
   TurnEventData<"progress", { text: string }>
 > & { turnId: string };
 
+/**
+ * One file the Agent announced in its Session's Drive with a File
+ * Notification. The file stays in the Session's Drive and may change; read it
+ * pinned to `version` with `session.files.read(path, { version })`.
+ */
+export interface NotifiedFile {
+  /** Path relative to the Session's Drive root. */
+  path: string;
+  /** Display name, by default the path's last segment. */
+  name: string;
+  /** Opaque version the file had when announced. */
+  version: string;
+  byteSize: number;
+  /** Last modification time, or null when storage reports none. */
+  updatedAt: string | null;
+}
+
+/**
+ * Why the Agent could not make a File Notification. `local_only` is a folder
+ * such as `build/` that the Sandbox never saves to the Session's Drive;
+ * `drain_failed`, the Sandbox could not save its pending writes. The service
+ * may add reasons: treat an unknown one as a generic refusal.
+ */
+export type FileNotificationRefusalReason =
+  | "not_found"
+  | "directory"
+  | "local_only"
+  | "uploads"
+  | "reserved"
+  | "skills"
+  | "invalid_path"
+  | "path_too_long"
+  | "invalid_arguments"
+  | "limit_reached"
+  | "drain_failed"
+  | "unavailable"
+  | (string & {});
+
+/** Why a File Notification announced nothing, and the path the Agent tried. */
+export interface FileNotificationRefusal {
+  reason: FileNotificationRefusalReason;
+  /**
+   * Relative to the Session's Drive root when it resolves inside it,
+   * otherwise as the Agent gave it. Absent when the Agent gave no usable path.
+   */
+  path?: string;
+}
+
 export interface OperationStepPayload {
   operationId: string;
   status: "running" | "succeeded" | "failed" | "interrupted" | "unknown_result";
@@ -58,6 +107,10 @@ export interface OperationStepPayload {
   category?: "tool_call" | "skill_read";
   skill?: { skillId: string; name: string };
   source?: { type: "session_client" } | { type: string; [field: string]: unknown };
+  /** On the succeeded step of a File Notification: the file it announced. */
+  file?: NotifiedFile;
+  /** On the failed step of a File Notification: why it announced nothing. */
+  fileRefusal?: FileNotificationRefusal;
 }
 
 export type TurnItemAddedEvent = KnownEvent<
@@ -189,6 +242,21 @@ const FINISHED_STATUS: Record<string, string> = {
 const isTextPayload = (payload: Record<string, unknown>) =>
   isString(payload.text);
 
+const isNotifiedFile = (value: unknown): value is NotifiedFile =>
+  isObject(value) &&
+  isString(value.path) &&
+  isString(value.name) &&
+  isString(value.version) &&
+  isByteSize(value.byteSize) &&
+  (value.updatedAt === null || isString(value.updatedAt));
+
+const isFileNotificationRefusal = (
+  value: unknown,
+): value is FileNotificationRefusal =>
+  isObject(value) &&
+  isString(value.reason) &&
+  (value.path === undefined || isString(value.path));
+
 /** Whether a `client_tool_calls` payload has the fields the SDK types. */
 export const isClientToolCallsPayload = (
   payload: Record<string, unknown>,
@@ -219,7 +287,10 @@ const isKnownTurnPayload = (
       return (
         isString(payload.operationId) &&
         isString(payload.status) &&
-        isString(payload.label)
+        isString(payload.label) &&
+        (payload.file === undefined || isNotifiedFile(payload.file)) &&
+        (payload.fileRefusal === undefined ||
+          isFileNotificationRefusal(payload.fileRefusal))
       );
     case "client_tool_calls":
       return isClientToolCallsPayload(payload);

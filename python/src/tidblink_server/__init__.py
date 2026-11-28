@@ -27,6 +27,7 @@ from .events import (
     TurnProgressEvent,
     TurnItemAddedEvent,
     OperationStepPayload,
+    NotifiedFile,
     TurnRequiresActionEvent,
     ClientToolCallPayload,
     TurnCompletedEvent,
@@ -72,6 +73,10 @@ from .files import (
     FileContent,
     FileUploadError,
     FileUploadOutcomeUnknownError,
+)
+from .session_drive_files import (
+    SessionDriveFiles,
+    SessionDriveFileTicket,
 )
 from .skills import (
     Skills,
@@ -134,6 +139,7 @@ from .errors import (
     BackendConnectionClosedError,
     BackendRequestError,
     ConflictError,
+    DriveFileVersionConflictError,
     InputNotAppliedError,
     OutcomeUnknownError,
     TiDBLinkApiError,
@@ -144,6 +150,7 @@ from .errors import (
     TurnWaitTimeoutError,
 )
 from .history import (
+    FileNotificationRefusal,
     OperationRecord,
     OperationStatus,
     RealtimeResponseKind,
@@ -178,7 +185,6 @@ from .realtime import (
     RealtimeOpenAudio,
     RealtimeOpusAudioFormat,
     RealtimePcm16AudioFormat,
-    RealtimeVoiceSetting,
 )
 from .session import SelectableSessionModel, Session, SessionModel, SessionRecord, SessionSandboxSelection
 from .template_switch import TemplateSwitchReceipt, TemplateSwitchStatus
@@ -188,9 +194,9 @@ from .user import AgentModelCatalog, AgentTemplate, AgentTemplatePage, EndUserCl
 #: TiDB Link OpenAPI version supported by this SDK release.
 TIDB_LINK_API_VERSION = "0.0.1"
 #: Exact service baseline for the supported SDK surface.
-TIDB_LINK_REVISION = "3e920bc73c754dce4cbd5782811063da770be290"
+TIDB_LINK_REVISION = "c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7"
 #: SHA-256 of that service revision's ``docs/openapi.yaml``.
-TIDB_LINK_OPENAPI_SHA256 = "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c"
+TIDB_LINK_OPENAPI_SHA256 = "f3ed7342d8156d191d9756d99329d62ef549d05b369cca27c938f0eb973f3269"
 
 __all__ = [
     "OMIT",
@@ -232,6 +238,7 @@ __all__ = [
     "TiDBLinkError",
     "TiDBLinkApiError",
     "ConflictError",
+    "DriveFileVersionConflictError",
     "TiDBLinkConnectionError",
     "OutcomeUnknownError",
     "TurnWaitTimeoutError",
@@ -244,7 +251,6 @@ __all__ = [
     "RealtimeAudioFormats",
     "RealtimeModel",
     "RealtimeOpenAudio",
-    "RealtimeVoiceSetting",
     "AudioTurnEvent",
     "AudioTurnResult",
     "AudioTurnStoppedError",
@@ -256,6 +262,8 @@ __all__ = [
     "UserFiles",
     "UserFile",
     "UserFileSource",
+    "SessionDriveFiles",
+    "SessionDriveFileTicket",
     "FileUploadCapabilities",
     "FileUpload",
     "FileUploadGrant",
@@ -334,6 +342,8 @@ __all__ = [
     "TurnProgressEvent",
     "TurnItemAddedEvent",
     "OperationStepPayload",
+    "NotifiedFile",
+    "FileNotificationRefusal",
     "TurnRequiresActionEvent",
     "ClientToolCallPayload",
     "TurnCompletedEvent",

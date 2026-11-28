@@ -2,6 +2,86 @@
 
 ## Unreleased
 
+## 0.6.0-rc.0
+
+Prerelease on the `next` dist-tag. It breaks 0.5: see the Session language
+rename below.
+
+- Align with service
+  [c6ae2e37](https://github.com/mem9-ai/agent-stack/commit/c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7),
+  OpenAPI SHA-256
+  `f3ed7342d8156d191d9756d99329d62ef549d05b369cca27c938f0eb973f3269`, which
+  adds File Notifications and reads of files in a Session's Drive, and
+  renames the Session's language field (below). The
+  frozen files subset adds the Organization routes
+  `sessions/{id}/files/content` and `sessions/{id}/files/download-tickets`.
+  Otherwise the subsets change only by the error codes
+  `drive_file_version_conflict` and `drive_file_too_large`, by the optional
+  `file` of an `operation_step` event, by the optional `fileRefusal` of a
+  failed `operation_step` event and of an Operation in Turn reads, and by
+  descriptions.
+  The management subset adds the required `etag` of an Organization Skill
+  read, for the service's new-Version upload route, which this SDK does not
+  call yet; `SkillSummary` does not expose it.
+  `drive_file_too_large` is the Console's refusal to download a Template
+  Test's large file; no route the SDK calls answers it.
+- **Breaking:** Sessions carry their fixed Realtime Language as
+  `realtimeLanguage: "zh-CN" | "en-US" | null` instead of
+  `realtimeVoice: { language } | null`, following the service rename (ADR 0117
+  reserves `realtimeVoice` for the voice selection). `RealtimeModelSelection`
+  from `getRealtimeModelSelection` and `setRealtimeModel` replaces
+  `voice: { language } | null` with `language: RealtimeLanguage | null`, and
+  `RealtimeVoiceSetting` is no longer exported. A `setRealtimeModel` receipt
+  without a valid `realtimeLanguage` raises `OutcomeUnknownError`. The Python
+  SDK makes the same change.
+- `session.connect({ onFile })` runs for each file the Agent announces with a
+  File Notification: an `agent.session.turn.item.added` `operation_step` whose
+  payload carries `file`, `{ path, name, version, byteSize, updatedAt }`
+  (`NotifiedFile`). It runs after `onEvent`, which still receives the raw
+  event, and before the cursor advances. `asKnownSessionEvent` accepts the
+  optional `file` and does not narrow an event whose `file` is malformed.
+- `session.files` (`SessionDriveFiles`) reads files in the Session's Drive.
+  `read(path, { version })` returns the bytes and, for a file above 50 MiB,
+  follows the download ticket the service answers with, without the API Key.
+  `createDownloadTicket(path, { version })` returns `{ url, expiresAt,
+  byteSize }` with an absolute `url` that a device downloads without a key.
+  The `version` is opaque: the SDK sends any non-empty text as announced and
+  leaves its form to the service.
+- `DriveFileVersionConflictError`, a `ConflictError`, is raised when a pinned
+  read, ticket or ticket download finds that the file has changed
+  (`drive_file_version_conflict`). A missing file stays a 404
+  `TiDBLinkApiError` with code `drive_file_not_found`, and a missing Session
+  one with code `session_not_found`.
+- Turn reads type the `file.notify` Operation kind and its
+  `file_notification` result pointer. The audio Turn's `operation_step` event
+  type carries the same optional `file`.
+- A File Notification the Agent could not make says why: its failed
+  `operation_step` and the failed `file.notify` Operation in Turn reads carry
+  `fileRefusal`, `{ reason, path? }` (`FileNotificationRefusal`), with a
+  `reason` such as `not_found`, `directory` or `local_only` (a folder such as
+  `build/` that the Sandbox never saves) and the path the Agent tried. The
+  service may add reasons. `asKnownSessionEvent` (`as_known_session_event`)
+  accepts the optional `fileRefusal` and does not narrow an event whose
+  `fileRefusal` is malformed; `onFile` does not run for it. The audio Turn's
+  `operation_step` event type carries the same optional `fileRefusal`.
+- The packaged `flash-device.mjs` example (`examples/flash_device.py` in
+  Python) is the notify-then-Client-Tool device scenario: its `flash_device`
+  Client Tool hands the device a keyless ticket for the announced version, and
+  the device's answer is the tool's result. The service verification runs it.
+  `flashDeviceWorkflow` (`flash_device_workflow`) sends the message and keeps
+  the device connected until the Turn ends, waiting up to 10 minutes by
+  default because a build can take minutes; the script reads the wait from
+  `TURN_TIMEOUT_SECONDS`. The READMEs say to build files the Agent hands over
+  into a synced folder such as `out/`, since `build/`, `dist/`, `target/` and
+  `tmp/` stay in the Sandbox.
+- The Python SDK offers the same: `session.connect(on_file=...)`,
+  `session.files.read(path, version=...)`,
+  `session.files.create_download_ticket(path, version=...)`,
+  `DriveFileVersionConflictError` and `NotifiedFile`.
+- The methods are on the Organization-scoped Session handle,
+  `organization.user(userId).session(sessionId)`; the SDKs still support no
+  User API Keys.
+
 ## 0.5.1
 
 Stable release on the `latest` dist-tag for service

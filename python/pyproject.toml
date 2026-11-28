@@ -37,8 +37,8 @@ packages = ["src/tidblink_server"]
 [tool.tidblink]
 # The exact service baseline, as in typescript/package.json.
 api-version = "0.0.1"
-revision = "3e920bc73c754dce4cbd5782811063da770be290"
-openapi-sha256 = "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c"
+revision = "c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7"
+openapi-sha256 = "f3ed7342d8156d191d9756d99329d62ef549d05b369cca27c938f0eb973f3269"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

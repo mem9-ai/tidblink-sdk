@@ -1,6 +1,6 @@
 {
   "name": "@tidblink/server",
-  "version": "0.5.1",
+  "version": "0.6.0-rc.0",
   "description": "Official TypeScript SDK for TiDB Link",
   "license": "Apache-2.0",
   "type": "module",
@@ -8,8 +8,8 @@
     "node": ">=22.12"
   },
   "tidbLinkApiVersion": "0.0.1",
-  "tidbLinkRevision": "3e920bc73c754dce4cbd5782811063da770be290",
-  "tidbLinkOpenApiSha256": "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c",
+  "tidbLinkRevision": "c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7",
+  "tidbLinkOpenApiSha256": "f3ed7342d8156d191d9756d99329d62ef549d05b369cca27c938f0eb973f3269",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -27,6 +27,7 @@
     "./examples/upload-file.mjs": "./examples/upload-file.mjs",
     "./examples/submit-audio.mjs": "./examples/submit-audio.mjs",
     "./examples/serve-connector.mjs": "./examples/serve-connector.mjs",
+    "./examples/flash-device.mjs": "./examples/flash-device.mjs",
     "./examples/lamp-backend.mjs": "./examples/lamp-backend.mjs"
   },
   "files": [
@@ -40,6 +41,7 @@
     "examples/upload-file.mjs",
     "examples/submit-audio.mjs",
     "examples/serve-connector.mjs",
+    "examples/flash-device.mjs",
     "examples/lamp-backend.mjs"
   ],
   "scripts": {

@@ -1,4 +1,4 @@
-import { HttpClient, requireKnownKeys } from "./http.js";
+import { HttpClient, mediaType, requireKnownKeys } from "./http.js";
 import {
   OutcomeUnknownError,
   TiDBLinkApiError,
@@ -13,6 +13,8 @@ import type { OperationRecord, TurnFailure } from "./history.js";
 import {
   isClientToolCallsPayload,
   type ClientToolCallPayload,
+  type FileNotificationRefusal,
+  type NotifiedFile,
 } from "./events.js";
 import type { RequestOptions } from "./organization.js";
 
@@ -49,6 +51,10 @@ export type AudioTurnEvent =
         category?: OperationRecord["category"];
         skill?: OperationRecord["skill"];
         source?: OperationRecord["source"];
+        /** On the succeeded step of a File Notification: the file it announced. */
+        file?: NotifiedFile;
+        /** On the failed step of a File Notification: why it announced nothing. */
+        fileRefusal?: FileNotificationRefusal;
       }
     >
   | AudioEnvelope<
@@ -170,11 +176,7 @@ export async function* streamAudio(
     ));
     if (
       response.status !== 201 ||
-      response.headers
-        .get("content-type")
-        ?.split(";")[0]
-        ?.trim()
-        .toLowerCase() !== "text/event-stream" ||
+      mediaType(response) !== "text/event-stream" ||
       !response.body
     )
       throw new TiDBLinkError("Audio response omitted its event stream");

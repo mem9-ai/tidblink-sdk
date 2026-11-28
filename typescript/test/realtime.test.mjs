@@ -89,7 +89,7 @@ test("a Session reads and conditionally changes its independent Realtime Model s
     realtimeModel: "voice-a",
     realtimeModelRevision: 1,
     realtimeModelEtag: '"session_1-realtime-1"',
-    realtimeVoice: { language: "en-US" },
+    realtimeLanguage: "en-US",
     ...overrides,
   });
   let selectionUpdated = false;
@@ -140,7 +140,7 @@ test("a Session reads and conditionally changes its independent Realtime Model s
     model: "voice-a",
     revision: 1,
     etag: '"session_1-realtime-1"',
-    voice: { language: "en-US" },
+    language: "en-US",
   });
   const updated = await session.setRealtimeModel("voice-b", {
     ifMatch: current.etag,
@@ -149,7 +149,7 @@ test("a Session reads and conditionally changes its independent Realtime Model s
     model: "voice-b",
     revision: 2,
     etag: '"session_1-realtime-2"',
-    voice: { language: "en-US" },
+    language: "en-US",
   });
   await assert.rejects(
     session.setRealtimeModel("voice-a", { ifMatch: current.etag }),
@@ -460,3 +460,54 @@ for (const [name, invoke] of [
     assert.equal(calls.length, 1);
   });
 }
+for (const [label, language] of [
+  ["a missing realtimeLanguage", undefined],
+  ["an unsupported realtimeLanguage", "fr-FR"],
+  ["a realtimeLanguage in the former { language } shape", { language: "en-US" }],
+]) {
+  test(`setRealtimeModel treats a receipt with ${label} as an unknown outcome`, async () => {
+    const baseUrl = await serve(async (request, response) => {
+      for await (const _chunk of request);
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({
+          session: {
+            realtimeModel: "voice-b",
+            realtimeModelRevision: 2,
+            realtimeModelEtag: '"session_1-realtime-2"',
+            ...(language === undefined ? {} : { realtimeLanguage: language }),
+          },
+        }),
+      );
+    });
+    await assert.rejects(
+      clientFor(baseUrl)
+        .session("session_1")
+        .setRealtimeModel("voice-b", { ifMatch: '"session_1-realtime-1"' }),
+      (error) => error.name === "OutcomeUnknownError",
+    );
+  });
+}
+
+test("setRealtimeModel accepts a receipt whose Session has Realtime disabled", async () => {
+  const baseUrl = await serve(async (request, response) => {
+    for await (const _chunk of request);
+    response.setHeader("content-type", "application/json");
+    response.end(
+      JSON.stringify({
+        session: {
+          realtimeModel: "voice-b",
+          realtimeModelRevision: 2,
+          realtimeModelEtag: '"session_1-realtime-2"',
+          realtimeLanguage: null,
+        },
+      }),
+    );
+  });
+  assert.deepEqual(
+    await clientFor(baseUrl)
+      .session("session_1")
+      .setRealtimeModel("voice-b", { ifMatch: '"session_1-realtime-1"' }),
+    { model: "voice-b", revision: 2, etag: '"session_1-realtime-2"', language: null },
+  );
+});

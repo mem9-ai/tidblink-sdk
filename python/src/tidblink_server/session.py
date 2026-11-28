@@ -46,20 +46,21 @@ from .realtime import (
     RealtimeModelSelection,
     RealtimeOpenAudio,
     RealtimeAudioFormats,
-    RealtimeVoiceSetting,
+    RealtimeLanguage,
     realtime_model_selection_from,
     require_open_realtime_connection_receipt,
     require_realtime_connect_grant_receipt,
     require_realtime_connection_receipt,
     require_realtime_model_selection_receipt,
 )
+from .session_drive_files import SessionDriveFiles
 from .template_switch import TemplateSwitchReceipt, switch_template
 from .turn import TurnResult, message_data, submit_message, validate_wait_options, wait_for_result
 
 if TYPE_CHECKING:
     from ._http import Bytes
     from .audio import AudioTurnEvent, AudioTurnResult
-    from .events import RealtimeResponse, RealtimeTranscript, SessionEvent
+    from .events import NotifiedFile, RealtimeResponse, RealtimeTranscript, SessionEvent
     from .session_connection import ClientToolHandler, SessionConnection
 
 
@@ -106,7 +107,7 @@ class SessionRecord(TypedDict):
     realtimeModel: str | None
     realtimeModelRevision: int
     realtimeModelEtag: str
-    realtimeVoice: RealtimeVoiceSetting | None
+    realtimeLanguage: RealtimeLanguage | None
     template: NotRequired[SessionTemplate | None]
     realtime: SessionRealtime | None
     #: Current Session Configuration Epoch; None for read-only or provider-owned snapshots.
@@ -152,9 +153,17 @@ class Session:
         self.id = id
         self._record = record
         self._etag = etag
+        self._files: SessionDriveFiles | None = None
 
     def __repr__(self) -> str:
         return f"Session(id={self.id!r})"
+
+    @property
+    def files(self) -> SessionDriveFiles:
+        """Files in this Session's Drive, read by path, such as the files File Notifications announce."""
+        if self._files is None:
+            self._files = SessionDriveFiles(self._http, self.id)
+        return self._files
 
     @property
     def data(self) -> SessionRecord | None:
@@ -322,6 +331,7 @@ class Session:
         on_event: Callable[[SessionEvent], Awaitable[None] | None] | None = None,
         on_transcript: Callable[[RealtimeTranscript], Awaitable[None] | None] | None = None,
         on_response: Callable[[RealtimeResponse], Awaitable[None] | None] | None = None,
+        on_file: Callable[[NotifiedFile], Awaitable[None] | None] | None = None,
         max_buffered_bytes: int | None = None,
         on_error: Callable[[BaseException], None] | None = None,
     ) -> SessionConnection:
@@ -344,6 +354,7 @@ class Session:
             on_event=on_event,
             on_transcript=on_transcript,
             on_response=on_response,
+            on_file=on_file,
             max_buffered_bytes=max_buffered_bytes,
             on_error=on_error,
         )

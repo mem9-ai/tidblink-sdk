@@ -111,6 +111,16 @@ def require_known_keys(value: object, allowed: tuple[str, ...], label: str) -> d
     return dict(value)
 
 
+def is_byte_size(value: object) -> bool:
+    """A byte count the service reported: a non-negative integer, not a bool."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def media_type(response: httpx.Response) -> str:
+    """The response's media type, lowercased and without parameters; empty without one."""
+    return (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+
+
 def is_organization_api_key(value: object) -> bool:
     """Check the frozen wire grammar without retaining or exposing the credential."""
     return isinstance(value, str) and bool(_ORGANIZATION_API_KEY.fullmatch(value))
@@ -281,6 +291,14 @@ async def _error_input(response: httpx.Response, fallback_request_id: str) -> di
     if "retry-after" in response.headers:
         result["retry_after"] = response.headers["retry-after"]
     return result
+
+
+async def api_error_from(response: httpx.Response, fallback_request_id: str) -> TiDBLinkApiError:
+    """The service's error answer as an error: explicit conflicts as :class:`ConflictError`."""
+    details = await _error_input(response, fallback_request_id)
+    if details["status"] in (409, 412):
+        return ConflictError(**details)
+    return TiDBLinkApiError(**details)
 
 
 def _dump_json(value: Any) -> bytes:
@@ -544,18 +562,13 @@ class HttpClient:
                 continue
 
             try:
-                details = await _error_input(response, stable_request_id)
+                api_error = await api_error_from(response, stable_request_id)
             finally:
                 await response.aclose()
-            api_error = (
-                ConflictError(**details)
-                if details["status"] in (409, 412)
-                else TiDBLinkApiError(**details)
-            )
-            if outcome_unknown and (details["status"] >= 500 or details["status"] == 408):
+            if outcome_unknown and (api_error.status >= 500 or api_error.status == 408):
                 raise OutcomeUnknownError(
                     "TiDB Link could not confirm the mutation outcome",
-                    request_id=details["request_id"],
+                    request_id=api_error.request_id,
                     cause=api_error,
                 ) from api_error
             raise api_error

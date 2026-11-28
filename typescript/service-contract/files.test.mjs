@@ -85,3 +85,47 @@ test("file transfers retain the exact selected service contract and separate Use
     "nextCursor",
   ]);
 });
+
+const sessionFiles = "/api/v1/org/users/{userId}/sessions/{id}/files";
+
+test("files in a Session's Drive are read by path and version, with a distinct version conflict", () => {
+  const read = contract.paths[`${sessionFiles}/content`].get;
+  const query = Object.fromEntries(
+    read.parameters
+      .filter((parameter) => parameter.in === "query")
+      .map((parameter) => [parameter.name, parameter]),
+  );
+  assert.equal(query.path.required, true);
+  assert.equal(query.version.required, false);
+  // The SDK passes the version on as it was announced and leaves its form to the service.
+  assert.equal(query.version.schema.type, "string");
+  const content = read.responses["200"].content;
+  assert.equal(content["*/*"].schema.format, "binary");
+  // A large file answers with a ticket, which has no SHA-256, unlike File content.
+  assert.deepEqual(
+    content["application/vnd.tidb-link.file-download+json"].schema.required,
+    ["url", "expiresAt", "byteSize"],
+  );
+  const ticket = contract.paths[`${sessionFiles}/download-tickets`].post;
+  const request =
+    contract.components.schemas[
+      ticket.requestBody.content["application/json"].schema.$ref.split("/").at(-1)
+    ];
+  assert.deepEqual(request.required, ["path"]);
+  assert.deepEqual(Object.keys(request.properties).sort(), ["path", "version"]);
+  const answer =
+    contract.components.schemas[
+      ticket.responses["201"].content["application/json"].schema.$ref.split("/").at(-1)
+    ];
+  assert.deepEqual(answer.required, ["url", "expiresAt", "byteSize"]);
+  for (const operation of [read, ticket]) {
+    assert.match(operation.responses["404"].description, /session_not_found/);
+    assert.match(operation.responses["404"].description, /drive_file_not_found/);
+    assert.match(operation.responses["409"].description, /drive_file_version_conflict/);
+  }
+  assert.match(
+    contract.paths["/api/v1/drive-downloads/{ticket}"].get.responses["409"]
+      .description,
+    /drive_file_version_conflict/,
+  );
+});

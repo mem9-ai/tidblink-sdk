@@ -226,6 +226,17 @@ const errorInput = async (
   };
 };
 
+/** The service's error answer as an error: explicit conflicts as `ConflictError`. */
+export const apiErrorFrom = async (
+  response: Response,
+  fallbackRequestId: string,
+): Promise<TiDBLinkApiError> => {
+  const input = await errorInput(response, fallbackRequestId);
+  return input.status === 409 || input.status === 412
+    ? new ConflictError(input)
+    : new TiDBLinkApiError(input);
+};
+
 export const normalizeBaseUrl = (value: string): string => {
   const url = new URL(value);
   if (
@@ -258,6 +269,14 @@ export const requestOptions = (
   requireKnownKeys(options, ["requestId", "signal"], "Request options");
   return { ...options };
 };
+
+/** A byte count the service reported: a non-negative safe integer. */
+export const isByteSize = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) >= 0;
+
+/** The response's media type, lowercased and without parameters. */
+export const mediaType = (response: Response): string | undefined =>
+  response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
 
 /** Check the frozen wire grammar without retaining or exposing the credential. */
 export const isOrganizationApiKey = (value: unknown): value is string =>
@@ -563,21 +582,17 @@ export class HttpClient {
         continue;
       }
 
-      const input = await errorInput(response, stableRequestId);
-      const error =
-        input.status === 409 || input.status === 412
-          ? new ConflictError(input)
-          : new TiDBLinkApiError(input);
+      const error = await apiErrorFrom(response, stableRequestId);
       if (
         options.outcomeUnknown &&
-        (input.status >= 500 || input.status === 408)
+        (error.status >= 500 || error.status === 408)
       ) {
         throw new OutcomeUnknownError(
           "TiDB Link could not confirm the mutation outcome",
           {
-            ...(input.requestId === undefined
+            ...(error.requestId === undefined
               ? {}
-              : { requestId: input.requestId }),
+              : { requestId: error.requestId }),
             cause: error,
           },
         );

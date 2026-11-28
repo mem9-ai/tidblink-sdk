@@ -14,6 +14,7 @@ import { TiDBLinkApiError, TiDBLinkError } from "./errors.js";
 import {
   asKnownSessionEvent,
   sessionEventFrom,
+  type NotifiedFile,
   type RealtimeResponseEvent,
   type RealtimeTranscriptEvent,
   type SessionEvent,
@@ -106,6 +107,13 @@ export interface ConnectOptions {
   onTranscript?: (transcript: RealtimeTranscript) => void | Promise<void>;
   /** Each completed Realtime model response. */
   onResponse?: (response: RealtimeResponse) => void | Promise<void>;
+  /**
+   * Each file the Agent announces with a File Notification, from the
+   * succeeded `operation_step` of `agent.session.turn.item.added` that
+   * carries it. Read the file with `session.files.read(file.path, { version:
+   * file.version })`; it asks for no reply.
+   */
+  onFile?: (file: NotifiedFile) => void | Promise<void>;
   /**
    * For an observing connection: most event data, in bytes of the frames
    * that carried it, that may wait for the callbacks. Past it, the connection
@@ -461,11 +469,22 @@ export class SessionConnection {
     if (this.#ended || notAfter(event.cursor, this.#cursor)) return;
     const options = this.#options;
     await this.#run(() => options.onEvent?.(event));
+    // At most one typed callback per event, after onEvent.
     const known = asKnownSessionEvent(event);
-    if (known?.type === "agent.session.realtime.input_transcript.completed")
-      await this.#run(() => options.onTranscript?.(known.data));
-    if (known?.type === "agent.session.realtime.response.completed")
-      await this.#run(() => options.onResponse?.(known.data));
+    switch (known?.type) {
+      case "agent.session.realtime.input_transcript.completed":
+        await this.#run(() => options.onTranscript?.(known.data));
+        break;
+      case "agent.session.realtime.response.completed":
+        await this.#run(() => options.onResponse?.(known.data));
+        break;
+      case "agent.session.turn.item.added": {
+        const file =
+          known.data.event === "operation_step" ? known.data.payload.file : undefined;
+        if (file) await this.#run(() => options.onFile?.(file));
+        break;
+      }
+    }
     this.#cursor = event.cursor;
     for (const watcher of this.#watchers) {
       watcher.events.push(event);
@@ -492,26 +511,26 @@ export class SessionConnection {
   }
 }
 
+/** The `connect()` options that are callbacks. */
+const CALLBACKS = [
+  "onCursor",
+  "onEvent",
+  "onTranscript",
+  "onResponse",
+  "onFile",
+  "onError",
+] as const;
+
 /** Check `connect()` options and turn tool handlers into declarations. */
 export function connectDeclarations(
   options: ConnectOptions,
 ): ClientToolDeclaration[] | undefined {
   requireKnownKeys(
     options,
-    [
-      "tools",
-      "observe",
-      "cursor",
-      "maxBufferedBytes",
-      "onCursor",
-      "onEvent",
-      "onTranscript",
-      "onResponse",
-      "onError",
-    ],
+    ["tools", "observe", "cursor", "maxBufferedBytes", ...CALLBACKS],
     "Session connection options",
   );
-  for (const key of ["onCursor", "onEvent", "onTranscript", "onResponse", "onError"] as const)
+  for (const key of CALLBACKS)
     if (options[key] !== undefined && typeof options[key] !== "function")
       throw new TypeError(`${key} must be a function`);
   if (

@@ -19,6 +19,7 @@ languages.
 | Prepare Realtime | Prepare a Session's Realtime connection for a terminal | [prepare-realtime-connection.mjs](../typescript/examples/prepare-realtime-connection.mjs) | [prepare_realtime_connection.py](../python/examples/prepare_realtime_connection.py) |
 | Read usage | Read a User's usage by period and billing tag | [read-usage.mjs](../typescript/examples/read-usage.mjs) | [read_usage.py](../python/examples/read_usage.py) |
 | Serve a Connector | Serve a cloud capability to every Session over the Backend Connection; answer with the calling user's data | [serve-connector.mjs](../typescript/examples/serve-connector.mjs) | [serve_connector.py](../python/examples/serve_connector.py) |
+| Flash a device | Receive the file the Agent built with a File Notification; a Client Tool hands the device a keyless download ticket pinned to the announced version, and the device's answer returns to the model in the same Turn; the device stays connected until the Turn ends, through a build that takes minutes | [flash-device.mjs](../typescript/examples/flash-device.mjs) | [flash_device.py](../python/examples/flash_device.py) |
 
 Add a column when a new SDK lands, and link each example it provides.
 

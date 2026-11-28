@@ -18,6 +18,7 @@ from ._types import OMIT, Omittable
 from .client_tools import ClientToolDeclaration, validate_client_tools
 from .errors import TiDBLinkApiError, TiDBLinkError
 from .events import (
+    NotifiedFile,
     RealtimeResponse,
     RealtimeTranscript,
     SessionEvent,
@@ -72,6 +73,18 @@ class ClientToolHandler:
 ClientToolHandlers = Mapping[str, "ClientToolHandler | Mapping[str, Any]"]
 
 Callback = Callable[[Any], Awaitable[None] | None]
+
+
+@dataclass(frozen=True)
+class _Callbacks:
+    """The application's callbacks of one connection, as ``connect()`` received them."""
+
+    on_cursor: Callback | None
+    on_event: Callback | None
+    on_transcript: Callback | None
+    on_response: Callback | None
+    on_file: Callback | None
+    on_error: Callable[[BaseException], None] | None
 
 
 def _not_after(cursor: str, last: str | None) -> bool:
@@ -181,12 +194,8 @@ class SessionConnection:
         declarations: list[ClientToolDeclaration] | None,
         observe: bool,
         cursor: str | None,
-        on_cursor: Callback | None,
-        on_event: Callback | None,
-        on_transcript: Callback | None,
-        on_response: Callback | None,
+        callbacks: _Callbacks,
         max_buffered_bytes: int | None,
-        on_error: Callable[[BaseException], None] | None,
     ) -> None:
         loop = asyncio.get_running_loop()
         self._pool = pool
@@ -197,11 +206,7 @@ class SessionConnection:
         self._declarations = declarations
         self._cursor = cursor
         self._generation: int | None = None
-        self._on_cursor = on_cursor
-        self._on_event = on_event
-        self._on_transcript = on_transcript
-        self._on_response = on_response
-        self._on_error = on_error
+        self._callbacks = callbacks
         self._max_buffered = (
             (max_buffered_bytes or DEFAULT_MAX_BUFFERED_BYTES) if observe else float("inf")
         )
@@ -353,9 +358,10 @@ class SessionConnection:
         self._jobs.put_nowait(job)
 
     def _report(self, error: BaseException) -> None:
-        if self._on_error is not None:
+        on_error = self._callbacks.on_error
+        if on_error is not None:
             try:
-                self._on_error(error)
+                on_error(error)
                 return
             except Exception as thrown:
                 error = thrown
@@ -467,19 +473,24 @@ class SessionConnection:
         # A re-attach replays from the last completed event; skip what already ran.
         if self._ended is not None or _not_after(event["cursor"], self._cursor):
             return
-        await self._run(self._on_event, event)
-        known = as_known_session_event(event)
-        if known is not None and known["type"] == "agent.session.realtime.input_transcript.completed":
-            transcript: RealtimeTranscript = known["data"]  # type: ignore[assignment]
-            await self._run(self._on_transcript, transcript)
-        if known is not None and known["type"] == "agent.session.realtime.response.completed":
-            response: RealtimeResponse = known["data"]  # type: ignore[assignment]
-            await self._run(self._on_response, response)
+        callbacks = self._callbacks
+        await self._run(callbacks.on_event, event)
+        # At most one typed callback per event, after on_event.
+        match as_known_session_event(event):
+            case {"type": "agent.session.realtime.input_transcript.completed", "data": transcript}:
+                await self._run(callbacks.on_transcript, transcript)
+            case {"type": "agent.session.realtime.response.completed", "data": response}:
+                await self._run(callbacks.on_response, response)
+            case {
+                "type": "agent.session.turn.item.added",
+                "data": {"event": "operation_step", "payload": {"file": file}},
+            }:
+                await self._run(callbacks.on_file, file)
         self._cursor = event["cursor"]
         for watcher in self._watchers:
             watcher.events.append(event)
             watcher.wake()
-        await self._run(self._on_cursor, event["cursor"])
+        await self._run(callbacks.on_cursor, event["cursor"])
 
     async def _run(self, callback: Callback | None, value: Any) -> None:
         if callback is None:
@@ -585,6 +596,7 @@ async def connect_session(
     on_event: Callable[[SessionEvent], Awaitable[None] | None] | None = None,
     on_transcript: Callable[[RealtimeTranscript], Awaitable[None] | None] | None = None,
     on_response: Callable[[RealtimeResponse], Awaitable[None] | None] | None = None,
+    on_file: Callable[[NotifiedFile], Awaitable[None] | None] | None = None,
     max_buffered_bytes: int | None = None,
     on_error: Callable[[BaseException], None] | None = None,
 ) -> SessionConnection:
@@ -592,6 +604,9 @@ async def connect_session(
 
     ``on_cursor`` runs after each event's callbacks complete, with its cursor;
     persist it and pass it back as ``cursor`` to resume after that event.
+    ``on_file`` receives each file the Agent announces with a File
+    Notification, from the succeeded ``operation_step`` that carries it; read
+    it with ``session.files.read(file["path"], version=file["version"])``.
     ``max_buffered_bytes`` (observing connections only, default 8 MiB) bounds
     the event data, in bytes of the frames that carried it, that may wait for
     the callbacks; past it the connection stops taking events and, once the
@@ -604,18 +619,20 @@ async def connect_session(
     user_id = http.user_id
     if pool is None or not user_id:
         raise TiDBLinkError("connect() needs a Session selected through OrganizationClient.user(user_id)")
+    callbacks = _Callbacks(
+        on_cursor=on_cursor,
+        on_event=on_event,
+        on_transcript=on_transcript,
+        on_response=on_response,
+        on_file=on_file,
+        on_error=on_error,
+    )
     handlers, declarations = connect_declarations(
         tools=tools,
         observe=observe,
         cursor=cursor,
         max_buffered_bytes=max_buffered_bytes,
-        callbacks={
-            "on_cursor": on_cursor,
-            "on_event": on_event,
-            "on_transcript": on_transcript,
-            "on_response": on_response,
-            "on_error": on_error,
-        },
+        callbacks=vars(callbacks),
     )
     connection = SessionConnection(
         pool,
@@ -626,12 +643,8 @@ async def connect_session(
         declarations=declarations,
         observe=observe,
         cursor=cursor,
-        on_cursor=on_cursor,
-        on_event=on_event,
-        on_transcript=on_transcript,
-        on_response=on_response,
+        callbacks=callbacks,
         max_buffered_bytes=max_buffered_bytes,
-        on_error=on_error,
     )
     await connection._attach()
     connection._start()

@@ -1,6 +1,6 @@
 {
-  "revision": "3e920bc73c754dce4cbd5782811063da770be290",
-  "sourceOpenApiSha256": "cfa915a6e1c143c00abf3a3554c4da805132742114d9125992d270551875185c",
+  "revision": "c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7",
+  "sourceOpenApiSha256": "f3ed7342d8156d191d9756d99329d62ef549d05b369cca27c938f0eb973f3269",
   "paths": {
     "/api/v1/org/users/{userId}/sessions/{id}/turns/audio": {
       "post": {
@@ -428,6 +428,8 @@
                   "artifact_publish_failed",
                   "artifact_bytes_need_repair",
                   "drive_file_not_found",
+                  "drive_file_version_conflict",
+                  "drive_file_too_large",
                   "drive_path_too_long",
                   "drive_download_rate_limited",
                   "drive_download_provider_error",
@@ -907,6 +909,77 @@
                   },
                   "source": {
                     "$ref": "#/components/schemas/ClientToolOperationSource"
+                  },
+                  "file": {
+                    "description": "The file a File Notification announced, present only on the succeeded step of a file.notify Operation. The file stays in the Session's Drive and may change; read it pinned to version through the Session file content route or a download ticket. The Operation's resultPointer in Turn reads carries the same reference with kind file_notification.",
+                    "type": "object",
+                    "required": [
+                      "path",
+                      "name",
+                      "version",
+                      "byteSize",
+                      "updatedAt"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "Path relative to the Session's Drive root."
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "Display name, by default the path's last segment."
+                      },
+                      "version": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{1,32}$",
+                        "description": "Opaque version the file had when announced."
+                      },
+                      "byteSize": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date-time",
+                        "description": "Last modification time, or null when storage reports none."
+                      }
+                    }
+                  },
+                  "fileRefusal": {
+                    "description": "Why a File Notification announced nothing, present only on the failed step of a file.notify Operation. The Operation in Turn reads carries the same fileRefusal. New reasons may be added; treat an unknown reason as a generic refusal.",
+                    "type": "object",
+                    "required": [
+                      "reason"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "reason": {
+                        "type": "string",
+                        "enum": [
+                          "not_found",
+                          "directory",
+                          "local_only",
+                          "uploads",
+                          "reserved",
+                          "skills",
+                          "invalid_path",
+                          "path_too_long",
+                          "invalid_arguments",
+                          "limit_reached",
+                          "drain_failed",
+                          "unavailable"
+                        ],
+                        "description": "not_found, no file at the path; directory, the path names a folder; local_only, the path is in a folder such as build/, dist/ or node_modules/ that the sandbox keeps to itself and never saves to the Session's Drive; uploads, a read-only upload; reserved, the platform's .tidb-link folder; skills, the read-only Skill folder; invalid_path, not a path inside the Session's Drive; path_too_long, longer than a download ticket can carry; invalid_arguments, an unknown argument or an invalid display name; limit_reached, the Turn already announced 20 files; drain_failed, the sandbox could not save its pending writes, so the file may be incomplete; unavailable, storage could not be read right now."
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "description": "The path the Agent tried, relative to the Session's Drive root when it resolves inside it, otherwise as the Agent gave it. Absent when the Agent gave no usable path."
+                      }
+                    }
                   }
                 }
               }

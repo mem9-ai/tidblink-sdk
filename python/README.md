@@ -10,7 +10,7 @@ not ship it to browsers or devices.
 
 It follows the [TypeScript SDK](../typescript/README.md): the same supported
 scope, behaviour, errors and recovery rules, for the same exact service
-revision ([3e920bc7](https://github.com/mem9-ai/agent-stack/commit/3e920bc73c754dce4cbd5782811063da770be290)).
+revision ([c6ae2e37](https://github.com/mem9-ai/agent-stack/commit/c6ae2e37c604368ed8dc365a0bc73ea3387f3bd7)).
 The TypeScript README is the reference for what each capability does and how to
 recover from an uncertain outcome; this README covers how that surface looks in
 Python.
@@ -21,7 +21,8 @@ Organization information, End User provisioning, Template and Skill
 management, serving Connectors and reading them, Template/model discovery, Session
 management and Template switches, text submission, steering, cancellation,
 checkpoint retry, original-result waiting, Client Tools, Session connections
-over Backend Connections with progress and events, conversation history, file
+over Backend Connections with progress and events, File Notifications and
+reads of files in a Session's Drive, conversation history, file
 attachments, Realtime Model/Connection preparation, prerecorded audio and User
 usage reads. Every resource workflow uses an Organization API Key with an
 explicitly selected End User.
@@ -91,7 +92,7 @@ asyncio.run(main())
 | `organization.close()` | `await organization.close()` or `async with OrganizationClient(...)`; it also closes the HTTP client the SDK created (one passed as `http_client` stays open), so REST calls stop afterwards |
 
 Error classes keep their TypeScript names otherwise (`TiDBLinkApiError`,
-`ConflictError`, `OutcomeUnknownError`, `TurnWaitTimeoutError`,
+`ConflictError`, `DriveFileVersionConflictError`, `OutcomeUnknownError`, `TurnWaitTimeoutError`,
 `InputNotAppliedError`, `TurnFailedError`, `TurnInterruptedError`,
 `BackendConnectionClosedError`, `BackendRequestError`, `FileUploadError`, …),
 with snake_case attributes (`error.request_id`, `error.input_id`). The error an
@@ -162,6 +163,7 @@ conn = await organization.user(user_id).session(session_id).connect(
     },
     cursor=await db.get_cursor(device_id),
     on_cursor=lambda cursor: db.save_cursor(device_id, cursor),
+    on_file=lambda file: app.push(device_id, {"file": file["name"]}),
     on_event=forward,
 )
 reply = await conn.send("Turn the light on", on_progress=lambda draft: show(draft))
@@ -182,6 +184,15 @@ the model as not performed at once: no `run` handler sees it, and no
 are executed only by the Session's executing connection; no REST command
 answers them.
 
+`on_file` receives each file the Agent announces with a File Notification, as
+the service's `{"path", "name", "version", "byteSize", "updatedAt"}` dict
+(`NotifiedFile`); see [Files in a Session's Drive](#files-in-a-sessions-drive).
+A File Notification the Agent could not make has no `file`: its failed
+`operation_step` carries `fileRefusal`, `{"reason", "path"?}`
+(`FileNotificationRefusal`), which `as_known_session_event` checks in
+`on_event`, and the failed `file.notify` Operation in Turn reads carries the
+same. Treat an unknown `reason` as a generic refusal.
+
 Callbacks may be plain functions or coroutines. They run one event at a time;
 an exception in one goes to `on_error`, or else to the event loop's exception
 handler. At a Client Tool call's deadline the SDK cancels the `run` task and
@@ -189,6 +200,56 @@ reports the timeout.
 
 The smart lamp example, [`examples/lamp_backend.py`](examples/lamp_backend.py),
 follows the [shared specification](../examples/lamp/README.md).
+
+## Files in a Session's Drive
+
+`session.files` reads a file in the Session's Drive by path, pinned to the
+version a File Notification announced, with the rules of the
+[TypeScript SDK](../typescript/README.md#files-in-a-sessions-drive):
+
+```python
+data = await session.files.read(file["path"], version=file["version"])  # bytes
+ticket = await session.files.create_download_ticket(file["path"], version=file["version"])
+# ticket: {"url", "expiresAt", "byteSize"}; url is absolute, and its holder downloads without a key.
+```
+
+A file changed since its announcement raises `DriveFileVersionConflictError`, a
+`ConflictError`; a missing file raises a 404 `TiDBLinkApiError` with code
+`drive_file_not_found`, and a deleted or foreign Session code
+`session_not_found`. Above 50 MiB, `read` follows the download ticket the
+service answers with, without the API Key. `version` is opaque: an empty
+`path` or `version` raises `ValueError` before anything is sent, and the
+service judges the rest.
+
+Only files in the Session's Drive can be announced: `build/`, `dist/`,
+`target/`, `tmp/` and similar folders stay in the Sandbox, and `notify_file`
+refuses a file there with `local_only`. Tell the model in the
+Template's instructions to build files it hands over into a synced folder such
+as `out/` or `firmware/`.
+
+To have a device act on the file within the same Turn, declare a Client Tool
+that takes the path and version, and tell the model in the Template's
+instructions to call it after `notify_file`:
+
+```python
+async def flash_device(args, context):  # cancelled at context.deadline_at
+    ticket = await session.files.create_download_ticket(args["path"], version=args["version"])
+    return await device.flash(url=ticket["url"], byte_size=ticket["byteSize"])
+```
+
+[`examples/flash_device.py`](examples/flash_device.py) declares this tool in
+`connect_device_flasher(session, device, on_file=...)`, with
+`DownloadingDevice(save)` standing in for your device channel.
+
+Keep the device connected until the Turn ends: a call made while no connection
+executes the Session is reported to the model as not performed. A build can
+take minutes, longer than `send()`'s default 60-second wait, so pass a
+`timeout` that covers the build and close the connection only after `send()`
+returns. `flash_device_workflow(session, device, text, timeout=600)` does so:
+it connects, sends `text`, stays connected until the Turn ends and returns its
+result, or raises `TurnWaitTimeoutError` and disconnects when the wait ends
+first. Run as a script, the example reads that wait from
+`TURN_TIMEOUT_SECONDS` (default 600), like the TypeScript example.
 
 ## Files, audio, Realtime and usage
 

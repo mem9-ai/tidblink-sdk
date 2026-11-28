@@ -82,6 +82,8 @@ const snapshots = {
       `${user}/drive/uploads/{uploadId}/content`,
       `${user}/drive/uploads/{uploadId}/parts/{partNumber}/presign`,
       `${user}/drive/uploads/{uploadId}/complete`,
+      `${session}/files/content`,
+      `${session}/files/download-tickets`,
       "/api/v1/drive-uploads/{ticket}",
       "/api/v1/drive-downloads/{ticket}",
     ],
