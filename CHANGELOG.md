@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.6.0-rc.1
+
+Prerelease on the `next` dist-tag. It adds Realtime Voice selection to
+0.6.0-rc.0 and changes nothing else.
+
 - Align with service
   [7eabff7c](https://github.com/mem9-ai/agent-stack/commit/7eabff7c48143ecd83161040ed95d79fa2d78ad5),
   OpenAPI SHA-256
